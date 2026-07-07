@@ -1,0 +1,313 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id                Int               @id @default(autoincrement())
+  name              String            @unique
+  accountParam      String
+  accountType       String
+  stage             String
+  personaBase       String            @default("")
+  city              String            @default("")
+  targetUsers       String            @default("")
+  painPoints        String            @default("")
+  contentDirections String            @default("")
+  businessGoals     String            @default("")
+  monetization      String            @default("")
+  referenceAccounts String            @default("")
+  materialCondition String            @default("")
+  taboos            String            @default("")
+  profilePath       String
+  assetsPath        String
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  strategy          AccountStrategy?
+  profile           AccountProfile?
+  assets            Asset[]
+  weeklyPlans       WeeklyPlan[]
+  noteTasks         NoteTask[]
+  prompts           GeneratedPrompt[]
+  commands          CommandSuggestion[]
+  drafts            DraftResult[]
+  weeklyReports     WeeklyReport[]
+  referenceResearches AccountReferenceResearch[]
+  imageStyleStudies AccountImageStyleStudy[]
+  interactionPlans  AccountInteractionPlan[]
+  logs              SystemLog[]
+
+  @@map("accounts")
+}
+
+model AccountReferenceResearch {
+  id                Int      @id @default(autoincrement())
+  accountId         Int
+  searchKeywords    String
+  commandJson       String
+  researchPrompt    String
+  rawResults        String   @default("")
+  selectedAccounts  String   @default("")
+  summaryMarkdown   String   @default("")
+  contentFeatures   String   @default("")
+  personaInsights   String   @default("")
+  strategyInsights  String   @default("")
+  status            String   @default("待搜索")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  account           Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("account_reference_researches")
+}
+
+model AccountImageStyleStudy {
+  id              Int      @id @default(autoincrement())
+  accountId       Int
+  searchKeywords  String
+  commandJson     String
+  researchPrompt  String
+  rawResults      String   @default("")
+  summaryMarkdown String   @default("")
+  styleBriefJson  String   @default("[]")
+  status          String   @default("待搜索")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("account_image_style_studies")
+}
+
+model AccountInteractionPlan {
+  id                    Int       @id @default(autoincrement())
+  accountId             Int
+  noteTaskId            Int?
+  searchKeywords        String
+  commandJson           String
+  discoveryPrompt       String
+  commentPrompt         String
+  rawResults            String    @default("")
+  targetUsersMarkdown   String    @default("")
+  commentDraftsMarkdown String    @default("")
+  status                String    @default("待搜索")
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  account               Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  noteTask              NoteTask? @relation(fields: [noteTaskId], references: [id], onDelete: SetNull)
+
+  @@map("account_interaction_plans")
+}
+
+model AccountTypeTemplate {
+  id                    Int      @id @default(autoincrement())
+  typeKey               String   @unique
+  name                  String
+  defaultColumns        String
+  weeklyRatio           String
+  imageStrategy         String
+  titleStrategy         String
+  coverStrategy         String
+  interactionStrategy   String
+  commercializationPath String
+  riskRules             String
+  promptRules           String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@map("account_type_templates")
+}
+
+model AccountStrategy {
+  id              Int      @id @default(autoincrement())
+  accountId       Int      @unique
+  positioning     String
+  strategyJson    String
+  markdown        String
+  agentsMdContent String
+  execGuide       String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("account_strategies")
+}
+
+model AccountProfile {
+  id        Int      @id @default(autoincrement())
+  accountId Int      @unique
+  path      String
+  content   String
+  version   Int      @default(1)
+  versions  String   @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("account_profiles")
+}
+
+model Asset {
+  id                 Int      @id @default(autoincrement())
+  accountId          Int
+  filePath           String
+  fileType           String
+  sourceType         String
+  location           String   @default("")
+  shotAt             String   @default("")
+  tags               String   @default("")
+  suitableTypes      String   @default("")
+  coverReady         Boolean  @default(false)
+  used               Boolean  @default(false)
+  authorizationState String   @default("待确认")
+  riskNotes          String   @default("")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  account            Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("assets")
+}
+
+model WeeklyPlan {
+  id                    Int        @id @default(autoincrement())
+  accountId             Int
+  weekStart             String
+  theme                 String
+  goal                  String
+  frequency             Int
+  ratio                 String
+  testHypothesis        String
+  commercializationMove String
+  interactionGoal       String
+  availableAssets       String
+  taboos                String
+  status                String     @default("draft")
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+  account               Account    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  noteTasks             NoteTask[]
+  weeklyReports         WeeklyReport[]
+
+  @@map("weekly_plans")
+}
+
+model NoteTask {
+  id             Int                 @id @default(autoincrement())
+  accountId      Int
+  weeklyPlanId   Int
+  publishAt      String
+  contentType    String
+  contentGoal    String
+  topicTitle     String
+  targetUser     String
+  painPoint      String
+  coreView       String
+  bodyStructure  String
+  requiredImages String
+  recommendedAssets String
+  coverCopyDirection String
+  commentHook    String
+  expectedGoal   String
+  status         String              @default("待生成Prompt")
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  account        Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  weeklyPlan     WeeklyPlan          @relation(fields: [weeklyPlanId], references: [id], onDelete: Cascade)
+  prompts        GeneratedPrompt[]
+  commands       CommandSuggestion[]
+  draftResult    DraftResult?
+  interactionPlans AccountInteractionPlan[]
+
+  @@map("note_tasks")
+}
+
+model GeneratedPrompt {
+  id          Int      @id @default(autoincrement())
+  accountId   Int
+  noteTaskId  Int
+  title       String
+  content     String
+  mode        String   @default("prompt_command_only")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  noteTask    NoteTask @relation(fields: [noteTaskId], references: [id], onDelete: Cascade)
+
+  @@map("generated_prompts")
+}
+
+model CommandSuggestion {
+  id          Int      @id @default(autoincrement())
+  accountId   Int
+  noteTaskId  Int?
+  category    String
+  command     String
+  description String
+  safetyNote  String
+  createdAt   DateTime @default(now())
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  noteTask    NoteTask? @relation(fields: [noteTaskId], references: [id], onDelete: SetNull)
+
+  @@map("command_suggestions")
+}
+
+model DraftResult {
+  id                  Int      @id @default(autoincrement())
+  accountId           Int
+  noteTaskId          Int      @unique
+  titleCandidates     String   @default("")
+  finalTitle          String   @default("")
+  coverCopyCandidates String   @default("")
+  finalCoverCopy      String   @default("")
+  body                String   @default("")
+  imageOrderAdvice    String   @default("")
+  imageCaptions       String   @default("")
+  tags                String   @default("")
+  commentGuide        String   @default("")
+  publishAdvice       String   @default("")
+  publishStatus       String   @default("未发布")
+  rawResult           String   @default("")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  account             Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  noteTask            NoteTask @relation(fields: [noteTaskId], references: [id], onDelete: Cascade)
+
+  @@map("draft_results")
+}
+
+model WeeklyReport {
+  id          Int      @id @default(autoincrement())
+  accountId   Int
+  weeklyPlanId Int?
+  inputJson    String
+  prompt       String
+  createdAt    DateTime @default(now())
+  account      Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  weeklyPlan   WeeklyPlan? @relation(fields: [weeklyPlanId], references: [id], onDelete: SetNull)
+
+  @@map("weekly_reports")
+}
+
+model Setting {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+model SystemLog {
+  id        Int      @id @default(autoincrement())
+  accountId Int?
+  level     String
+  message   String
+  meta      String   @default("{}")
+  createdAt DateTime @default(now())
+  account   Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@map("system_logs")
+}

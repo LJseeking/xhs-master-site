@@ -1,0 +1,672 @@
+import type { Account, AccountStrategy, AccountTypeTemplate, Asset, NoteTask, WeeklyPlan } from "@prisma/client";
+import type { StrategyBundle } from "@/lib/strategy";
+import { fallbackReferenceSummary } from "@/lib/referenceResearch";
+import { fallbackInteractionSummary } from "@/lib/interactionPrompts";
+import { summarizeImageStyleStudyFallback } from "@/lib/imageStyleStudy";
+
+type LlmResult<T> =
+  | { usedLlm: true; data: T; model: string }
+  | { usedLlm: false; data: T; error?: string };
+
+type NoteTaskSeed = {
+  accountId: number;
+  weeklyPlanId: number;
+  publishAt: string;
+  contentType: string;
+  contentGoal: string;
+  topicTitle: string;
+  targetUser: string;
+  painPoint: string;
+  coreView: string;
+  bodyStructure: string;
+  requiredImages: string;
+  recommendedAssets: string;
+  coverCopyDirection: string;
+  commentHook: string;
+  expectedGoal: string;
+  status: string;
+};
+
+type WeeklyPlanInput = {
+  theme: string;
+  goal: string;
+  frequency: number;
+  ratio: string;
+  testHypothesis: string;
+  commercializationMove: string;
+  interactionGoal: string;
+  availableAssets: string;
+  taboos: string;
+};
+
+export function getLlmStatus() {
+  return {
+    enabled: Boolean(process.env.OPENAI_API_KEY),
+    model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+    baseUrl: process.env.OPENAI_BASE_URL || "https://api.openai.com/v1"
+  };
+}
+
+export async function generateStrategyWithLlm(
+  account: Account,
+  template: AccountTypeTemplate,
+  fallback: StrategyBundle
+): Promise<LlmResult<StrategyBundle>> {
+  const status = getLlmStatus();
+  if (!status.enabled) return { usedLlm: false, data: fallback, error: "OPENAI_API_KEY 未配置，已使用内置模板生成。" };
+
+  const prompt = `请为一个小红书账号生成完整运营策划案和 AGENTS.md。
+
+要求：
+- 当前产品模式是 Prompt + Command only，不允许真实发布、评论、点赞、收藏、私信。
+- 如果 account.referenceAccounts 中包含参考账号研究洞察，必须优先用于人设、差异化定位、栏目、标题、封面和商业化策略。
+- 必须保留 xiaohongshu_auto_op 的执行边界：真实账号操作只输出命令建议，人工确认。
+- 不伪造真实体验、真实授权、真实探店、真实亲历、真实轨迹或真实交易。
+- 以中文输出。
+- 只返回 JSON，不要 Markdown 代码块。
+
+账号信息：
+${JSON.stringify(
+  {
+    account,
+    accountTypeTemplate: template,
+    requiredSections: [
+      "账号一句话定位",
+      "账号类型判断",
+      "人设设定",
+      "用户画像",
+      "用户痛点",
+      "差异化定位",
+      "内容主线",
+      "内容栏目",
+      "选题方向",
+      "图片与素材策略",
+      "标题策略",
+      "封面策略",
+      "互动策略",
+      "增长策略",
+      "商业化路径",
+      "30 天启动计划",
+      "一周内容模板",
+      "风险与禁区",
+      "AGENTS.md 内容",
+      "给 xiaohongshu_auto_op 的执行说明"
+    ],
+    fallback
+  },
+  null,
+  2
+)}
+
+JSON 字段：
+{
+  "positioning": "账号一句话定位",
+  "strategy": { "可结构化保存的账号策略对象": true },
+  "markdown": "# 完整策划方案 Markdown",
+  "agentsMdContent": "# AGENTS.md Markdown",
+  "execGuide": "给 xiaohongshu_auto_op 的执行说明"
+}`;
+
+  const response = await createTextResponse({
+    instructions: "你是资深小红书内容运营策略师和自动化工作流编排专家。输出必须安全、具体、可执行，并严格遵守 Prompt + Command only 模式。",
+    input: prompt
+  });
+
+  if (!response.ok) return { usedLlm: false, data: fallback, error: response.error };
+
+  const parsed = extractJson(response.text);
+  if (!parsed || typeof parsed !== "object") {
+    return { usedLlm: false, data: fallback, error: "大模型返回内容不是可解析 JSON，已使用内置模板。" };
+  }
+
+  const positioning = readString(parsed, "positioning") || fallback.positioning;
+  const markdown = readString(parsed, "markdown") || fallback.markdown;
+  const agentsMdContent = readString(parsed, "agentsMdContent") || fallback.agentsMdContent;
+  const execGuide = readString(parsed, "execGuide") || fallback.execGuide;
+  const strategyJson = JSON.stringify(readObject(parsed, "strategy") || safeJson(fallback.strategyJson), null, 2);
+
+  return {
+    usedLlm: true,
+    model: status.model,
+    data: {
+      positioning,
+      strategyJson,
+      markdown,
+      agentsMdContent,
+      execGuide
+    }
+  };
+}
+
+export async function regenerateStrategyFromReferenceResearchWithLlm(input: {
+  account: Account;
+  template: AccountTypeTemplate;
+  referenceSummary: {
+    summaryMarkdown: string;
+    contentFeatures: string;
+    personaInsights: string;
+    strategyInsights: string;
+    rawResults: string;
+    selectedAccounts: string;
+  };
+  fallback: StrategyBundle;
+}): Promise<LlmResult<StrategyBundle>> {
+  const status = getLlmStatus();
+  if (!status.enabled) {
+    return { usedLlm: false, data: input.fallback, error: "OPENAI_API_KEY 未配置，无法基于参考账号研究重生成策划案与 AGENTS.md。" };
+  }
+
+  const prompt = `请严格基于“参考账号研究结果”重生成小红书账号策划案和 AGENTS.md。
+
+这是一个必须由 OpenAI API 参与的重生成步骤。请不要只复述模板；要把参考账号研究中的栏目、标题、封面、互动方式、用户评论痛点、差异化机会转化为我方账号的人设和运营策略。
+
+硬性要求：
+- 当前产品模式是 Prompt + Command only，不允许真实发布、评论、点赞、收藏、关注或私信。
+- 不得抄袭参考账号，不得把参考账号素材/经历伪装成我方真实体验。
+- 必须写出“借鉴什么”和“如何避免同质化”。
+- 必须生成完整策划案 Markdown 和可直接保存为 profiles/<账号名>/AGENTS.md 的内容。
+- 只返回 JSON，不要 Markdown 代码块。
+
+我方账号：
+${JSON.stringify(input.account, null, 2)}
+
+账号类型模板：
+${JSON.stringify(input.template, null, 2)}
+
+参考账号研究总结：
+${JSON.stringify(input.referenceSummary, null, 2)}
+
+内置模板兜底稿，仅供结构参考，不可机械照抄：
+${JSON.stringify(input.fallback, null, 2)}
+
+JSON 字段：
+{
+  "positioning": "基于参考账号研究后的账号一句话定位",
+  "strategy": {
+    "referenceAccountsUsed": ["参考账号/账号类型/内容特色"],
+    "borrowedPatterns": ["可借鉴的栏目、标题、封面、互动模式"],
+    "differentiationRules": ["避免同质化的具体规则"],
+    "persona": {},
+    "contentColumns": [],
+    "titleRules": [],
+    "coverRules": [],
+    "growthRules": [],
+    "commercializationRules": [],
+    "xhsAutoOpRules": []
+  },
+  "markdown": "# 完整策划方案 Markdown",
+  "agentsMdContent": "# AGENTS.md Markdown",
+  "execGuide": "给 xiaohongshu_auto_op 的执行说明"
+}`;
+
+  const response = await createTextResponse({
+    instructions: "你是资深小红书竞品研究、账号定位和内容运营策略专家。你必须把参考账号研究转化为差异化人设、栏目、标题、封面、互动和商业化策略，并严格遵守 Prompt + Command only 安全边界。",
+    input: prompt
+  });
+
+  if (!response.ok) return { usedLlm: false, data: input.fallback, error: response.error };
+
+  const parsed = extractJson(response.text);
+  if (!parsed || typeof parsed !== "object") {
+    return { usedLlm: false, data: input.fallback, error: "OpenAI 返回内容不是可解析 JSON，未重生成策划案。" };
+  }
+
+  return {
+    usedLlm: true,
+    model: status.model,
+    data: {
+      positioning: readString(parsed, "positioning") || input.fallback.positioning,
+      strategyJson: JSON.stringify(readObject(parsed, "strategy") || safeJson(input.fallback.strategyJson), null, 2),
+      markdown: readString(parsed, "markdown") || input.fallback.markdown,
+      agentsMdContent: readString(parsed, "agentsMdContent") || input.fallback.agentsMdContent,
+      execGuide: readString(parsed, "execGuide") || input.fallback.execGuide
+    }
+  };
+}
+
+export async function generateWeeklyTasksWithLlm(input: {
+  account: Account;
+  strategy: AccountStrategy | null;
+  assets: Asset[];
+  weeklyPlan: WeeklyPlan;
+  weeklyInput: WeeklyPlanInput;
+  fallbackTasks: NoteTaskSeed[];
+}): Promise<LlmResult<NoteTaskSeed[]>> {
+  const status = getLlmStatus();
+  if (!status.enabled) return { usedLlm: false, data: input.fallbackTasks, error: "OPENAI_API_KEY 未配置，已使用内置模板生成。" };
+
+  const prompt = `请根据账号策略、本周目标和素材情况，生成一周小红书 note_tasks。
+
+要求：
+- 生成 ${input.fallbackTasks.length} 篇。
+- 当前执行模式是只生成计划、Prompt 和命令建议，不允许真实发布或互动。
+- 每篇任务必须具体到用户痛点、核心观点、正文结构、图片要求、评论区钩子。
+- 推荐素材只能来自输入素材或明确写“素材缺口”，禁止伪造真实素材。
+- 只返回 JSON，不要 Markdown 代码块。
+
+输入：
+${JSON.stringify(
+  {
+    account: input.account,
+    strategy: input.strategy,
+    assets: input.assets.map((asset) => ({
+      filePath: asset.filePath,
+      fileType: asset.fileType,
+      sourceType: asset.sourceType,
+      tags: asset.tags,
+      suitableTypes: asset.suitableTypes,
+      coverReady: asset.coverReady,
+      authorizationState: asset.authorizationState,
+      riskNotes: asset.riskNotes
+    })),
+    weeklyPlan: input.weeklyPlan,
+    weeklyInput: input.weeklyInput,
+    fallbackTasks: input.fallbackTasks
+  },
+  null,
+  2
+)}
+
+JSON 字段：
+{
+  "tasks": [
+    {
+      "publishAt": "YYYY-MM-DD HH:mm",
+      "contentType": "图文笔记/视频脚本/教程清单等",
+      "contentGoal": "",
+      "topicTitle": "",
+      "targetUser": "",
+      "painPoint": "",
+      "coreView": "",
+      "bodyStructure": "",
+      "requiredImages": "",
+      "recommendedAssets": "",
+      "coverCopyDirection": "",
+      "commentHook": "",
+      "expectedGoal": "",
+      "status": "待生成Prompt"
+    }
+  ]
+}`;
+
+  const response = await createTextResponse({
+    instructions: "你是小红书周运营计划专家，擅长把账号定位、素材条件和测试假设拆成可执行 note_tasks。",
+    input: prompt
+  });
+
+  if (!response.ok) return { usedLlm: false, data: input.fallbackTasks, error: response.error };
+
+  const parsed = extractJson(response.text);
+  const rawTasks = parsed && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).tasks)
+    ? ((parsed as Record<string, unknown>).tasks as Array<Record<string, unknown>>)
+    : [];
+
+  if (!rawTasks.length) {
+    return { usedLlm: false, data: input.fallbackTasks, error: "大模型未返回 tasks 数组，已使用内置模板。" };
+  }
+
+  const tasks = rawTasks.slice(0, input.fallbackTasks.length).map((task, index) => {
+    const fallback = input.fallbackTasks[index] ?? input.fallbackTasks[0];
+    return {
+      accountId: input.account.id,
+      weeklyPlanId: input.weeklyPlan.id,
+      publishAt: stringFrom(task.publishAt, fallback.publishAt),
+      contentType: stringFrom(task.contentType, fallback.contentType),
+      contentGoal: stringFrom(task.contentGoal, fallback.contentGoal),
+      topicTitle: stringFrom(task.topicTitle, fallback.topicTitle),
+      targetUser: stringFrom(task.targetUser, fallback.targetUser),
+      painPoint: stringFrom(task.painPoint, fallback.painPoint),
+      coreView: stringFrom(task.coreView, fallback.coreView),
+      bodyStructure: stringFrom(task.bodyStructure, fallback.bodyStructure),
+      requiredImages: stringFrom(task.requiredImages, fallback.requiredImages),
+      recommendedAssets: stringFrom(task.recommendedAssets, fallback.recommendedAssets),
+      coverCopyDirection: stringFrom(task.coverCopyDirection, fallback.coverCopyDirection),
+      commentHook: stringFrom(task.commentHook, fallback.commentHook),
+      expectedGoal: stringFrom(task.expectedGoal, fallback.expectedGoal),
+      status: "待生成Prompt"
+    };
+  });
+
+  return { usedLlm: true, model: status.model, data: tasks };
+}
+
+export async function summarizeReferenceResearchWithLlm(input: {
+  account: Account;
+  template: AccountTypeTemplate;
+  rawResults: string;
+  selectedAccounts: string;
+}): Promise<LlmResult<{ summaryMarkdown: string; contentFeatures: string; personaInsights: string; strategyInsights: string }>> {
+  const fallback = fallbackReferenceSummary(input.rawResults);
+  const status = getLlmStatus();
+  if (!status.enabled) return { usedLlm: false, data: fallback, error: "OPENAI_API_KEY 未配置，已保存原始结果并使用占位总结。" };
+
+  const prompt = `请总结 xiaohongshu_auto_op 返回的同类型参考账号研究结果，并给出我方账号策划建议。
+
+要求：
+- 只分析，不执行任何真实账号操作。
+- 不得把参考账号内容、素材、经历伪装成我方原创真实体验。
+- 输出必须服务于生成我方账号的人设文件和策划案。
+- 只返回 JSON，不要 Markdown 代码块。
+
+我方账号：
+${JSON.stringify({ account: input.account, template: input.template }, null, 2)}
+
+用户手动标记/补充的参考账号：
+${input.selectedAccounts || "无"}
+
+xiaohongshu_auto_op 返回结果：
+${input.rawResults}
+
+JSON 字段：
+{
+  "summaryMarkdown": "# 参考账号研究总结 Markdown，包含候选账号、内容特色、标题封面、互动、评论痛点、可借鉴点、差异化机会、风险",
+  "contentFeatures": "参考账号内容特色总结",
+  "personaInsights": "对我方账号人设设定的建议",
+  "strategyInsights": "对我方内容栏目、标题、封面、增长、商业化路径的建议"
+}`;
+
+  const response = await createTextResponse({
+    instructions: "你是小红书竞品研究与账号定位专家，擅长把参考账号研究转成差异化人设和内容策略。",
+    input: prompt
+  });
+
+  if (!response.ok) return { usedLlm: false, data: fallback, error: response.error };
+  const parsed = extractJson(response.text);
+  if (!parsed) return { usedLlm: false, data: fallback, error: "大模型返回内容不是可解析 JSON，已使用占位总结。" };
+
+  return {
+    usedLlm: true,
+    model: status.model,
+    data: {
+      summaryMarkdown: readString(parsed, "summaryMarkdown") || fallback.summaryMarkdown,
+      contentFeatures: readString(parsed, "contentFeatures") || fallback.contentFeatures,
+      personaInsights: readString(parsed, "personaInsights") || fallback.personaInsights,
+      strategyInsights: readString(parsed, "strategyInsights") || fallback.strategyInsights
+    }
+  };
+}
+
+export async function summarizeInteractionCandidatesWithLlm(input: {
+  account: Account;
+  strategy: AccountStrategy | null;
+  noteTask: NoteTask | null;
+  rawResults: string;
+  discoveryPrompt: string;
+  commentPrompt: string;
+}): Promise<LlmResult<{ targetUsersMarkdown: string; commentDraftsMarkdown: string }>> {
+  const fallback = fallbackInteractionSummary(input.rawResults);
+  const status = getLlmStatus();
+  if (!status.enabled) return { usedLlm: false, data: fallback, error: "OPENAI_API_KEY 未配置，已保存原始结果并使用人工整理框架。" };
+
+  const prompt = `请分析 xiaohongshu_auto_op 返回的目标用户搜索结果，并生成评论互动策略。
+
+要求：
+- 当前产品模式是 Prompt + Command only，只生成策略、草稿和命令建议。
+- 不允许真实评论、回复、点赞、收藏、关注或私信。
+- 核心目标是筛选可能对我方账号和当前笔记感兴趣的用户。
+- 评论草稿必须基于候选用户/评论上下文，不得硬广、不得诱导私信、不得复制刷屏。
+- 如果候选信息不足，必须标明需要人工补充，不要编造用户。
+- 只返回 JSON，不要 Markdown 代码块。
+
+我方账号：
+${JSON.stringify(
+  {
+    account: input.account,
+    strategy: input.strategy
+      ? {
+          positioning: input.strategy.positioning,
+          execGuide: input.strategy.execGuide
+        }
+      : null,
+    noteTask: input.noteTask
+  },
+  null,
+  2
+)}
+
+找人 Prompt：
+${input.discoveryPrompt}
+
+评论策略 Prompt：
+${input.commentPrompt}
+
+xiaohongshu_auto_op 返回结果：
+${input.rawResults}
+
+JSON 字段：
+{
+  "targetUsersMarkdown": "# 目标用户搜索总结 Markdown，包含候选笔记、候选用户、兴趣信号、意向分层、排除对象、人工确认项",
+  "commentDraftsMarkdown": "# 评论互动策略 Markdown，包含评论原则、分层策略、12-20 条评论草稿、审核清单、xhs-interact 参数建议"
+}`;
+
+  const response = await createTextResponse({
+    instructions: "你是小红书社区互动策略专家，擅长从搜索结果和评论区里筛选潜在兴趣用户，并生成克制、真诚、有帮助的评论草稿。你必须严格遵守只生成 Prompt 和命令建议的安全模式。",
+    input: prompt
+  });
+
+  if (!response.ok) return { usedLlm: false, data: fallback, error: response.error };
+  const parsed = extractJson(response.text);
+  if (!parsed) return { usedLlm: false, data: fallback, error: "大模型返回内容不是可解析 JSON，已使用人工整理框架。" };
+
+  return {
+    usedLlm: true,
+    model: status.model,
+    data: {
+      targetUsersMarkdown: readString(parsed, "targetUsersMarkdown") || fallback.targetUsersMarkdown,
+      commentDraftsMarkdown: readString(parsed, "commentDraftsMarkdown") || fallback.commentDraftsMarkdown
+    }
+  };
+}
+
+export async function summarizeImageStyleStudyWithLlm(input: {
+  account: Account;
+  rawResults: string;
+  researchPrompt: string;
+}): Promise<LlmResult<{ summaryMarkdown: string; styleBrief: string[] }>> {
+  const fallback = summarizeImageStyleStudyFallback(input.account, input.rawResults);
+  const status = getLlmStatus();
+  if (!status.enabled) return { usedLlm: false, data: fallback, error: "OPENAI_API_KEY 未配置，已使用本地规则整理图片风格摘要。" };
+
+  const prompt = `请总结 xiaohongshu_auto_op 返回的小红书图片风格研究结果。
+
+要求：
+- 只分析图片风格，不要重写账号策划案，不要总结互动和商业化。
+- 输出要服务于后续 image2 图片 Prompt。
+- 不得建议伪造真实拍摄、真实经历、真实授权。
+- 必须把长研究压缩为可复用的图片风格原则。
+- 只返回 JSON，不要 Markdown 代码块。
+
+我方账号：
+${JSON.stringify(input.account, null, 2)}
+
+原始图片研究 Prompt：
+${input.researchPrompt}
+
+xiaohongshu_auto_op 返回结果：
+${input.rawResults}
+
+JSON 字段：
+{
+  "summaryMarkdown": "# 图片风格研究摘要 Markdown，包含封面共性、4 张图默认结构、真实感来源、收藏点、风险边界、我方建议",
+  "styleBrief": ["可放入单篇图片 Prompt 的短原则，4-6 条，每条不超过 40 字"]
+}`;
+
+  const response = await createTextResponse({
+    instructions: "你是小红书图片风格研究专家，擅长把竞品图片观察压缩成可执行的 image2 提示词原则。输出必须克制、真实、安全。",
+    input: prompt
+  });
+
+  if (!response.ok) return { usedLlm: false, data: fallback, error: response.error };
+  const parsed = extractJson(response.text);
+  if (!parsed) return { usedLlm: false, data: fallback, error: "大模型返回内容不是可解析 JSON，已使用本地规则整理图片风格摘要。" };
+  const rawBrief = Array.isArray(parsed.styleBrief) ? parsed.styleBrief : [];
+  const styleBrief = rawBrief
+    .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    .map((item) => item.trim())
+    .slice(0, 8);
+
+  return {
+    usedLlm: true,
+    model: status.model,
+    data: {
+      summaryMarkdown: readString(parsed, "summaryMarkdown") || fallback.summaryMarkdown,
+      styleBrief: styleBrief.length ? styleBrief : fallback.styleBrief
+    }
+  };
+}
+
+async function createTextResponse(input: { instructions: string; input: string }): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  const status = getLlmStatus();
+  const baseUrl = status.baseUrl.replace(/\/$/, "");
+  try {
+    const response = await fetch(`${baseUrl}/responses`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        model: status.model,
+        instructions: input.instructions,
+        input: input.input,
+        store: false
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      const shouldFallbackToChat =
+        response.status === 404 ||
+        response.status === 405 ||
+        (response.status === 400 && looksLikeUnsupportedResponses(errorText));
+      if (!shouldFallbackToChat) {
+        return { ok: false, error: `OpenAI API ${response.status}: ${errorText.slice(0, 600)}` };
+      }
+      return createChatCompletionResponse(input, baseUrl, status.model);
+    }
+
+    const json = await response.json();
+    const text = extractText(json);
+    if (!text) return { ok: false, error: "OpenAI API 没有返回文本内容。" };
+    return { ok: true, text };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "OpenAI API 调用失败。" };
+  }
+}
+
+async function createChatCompletionResponse(
+  input: { instructions: string; input: string },
+  baseUrl: string,
+  model: string
+): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  try {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: input.instructions },
+          { role: "user", content: input.input }
+        ],
+        stream: false
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return { ok: false, error: `Chat Completions API ${response.status}: ${errorText.slice(0, 600)}` };
+    }
+
+    const json = await response.json();
+    const text = extractChatCompletionText(json);
+    if (!text) return { ok: false, error: "Chat Completions API 没有返回文本内容。" };
+    return { ok: true, text };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Chat Completions API 调用失败。" };
+  }
+}
+
+function looksLikeUnsupportedResponses(text: string) {
+  const lower = text.toLowerCase();
+  return (
+    lower.includes("not found") ||
+    lower.includes("404") ||
+    lower.includes("unsupported") ||
+    lower.includes("unknown") ||
+    lower.includes("invalid url") ||
+    lower.includes("no route") ||
+    lower.includes("route")
+  );
+}
+
+function extractText(json: unknown) {
+  if (!json || typeof json !== "object") return "";
+  const record = json as Record<string, unknown>;
+  if (typeof record.output_text === "string") return record.output_text;
+  const output = Array.isArray(record.output) ? record.output : [];
+  return output
+    .flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const content = (item as Record<string, unknown>).content;
+      return Array.isArray(content) ? content : [];
+    })
+    .map((part) => {
+      if (!part || typeof part !== "object") return "";
+      const item = part as Record<string, unknown>;
+      return typeof item.text === "string" ? item.text : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function extractChatCompletionText(json: unknown) {
+  if (!json || typeof json !== "object") return "";
+  const choices = (json as Record<string, unknown>).choices;
+  if (!Array.isArray(choices)) return "";
+  return choices
+    .map((choice) => {
+      if (!choice || typeof choice !== "object") return "";
+      const message = (choice as Record<string, unknown>).message;
+      if (!message || typeof message !== "object") return "";
+      const content = (message as Record<string, unknown>).content;
+      return typeof content === "string" ? content : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function extractJson(text: string): Record<string, unknown> | null {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
+  const raw = fenced || text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function readString(source: Record<string, unknown>, key: string) {
+  return typeof source[key] === "string" ? source[key] : "";
+}
+
+function readObject(source: Record<string, unknown>, key: string) {
+  return source[key] && typeof source[key] === "object" && !Array.isArray(source[key])
+    ? (source[key] as Record<string, unknown>)
+    : null;
+}
+
+function safeJson(value: string) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
+  }
+}
+
+function stringFrom(value: unknown, fallback: string) {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
