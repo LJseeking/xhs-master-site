@@ -564,6 +564,53 @@ function accountTypeDefaults(accountType: string, template?: Template) {
   return common;
 }
 
+function accountChoiceOptions(accountType: string) {
+  const common = {
+    targetUsers: ["正在比较选择的用户", "希望先看真实案例的用户", "关注价格边界的用户", "本地到店咨询用户", "新客户"],
+    businessGoals: ["提升收藏", "增加咨询", "建立信任", "促进预约", "促进到店转化", "沉淀私域"],
+    materialCondition: ["门店/现场图", "服务过程图", "真实案例图", "产品图", "环境图", "价格或活动信息图"],
+    taboos: ["不伪造真实案例", "不伪造顾客评价", "不虚构价格/优惠", "不夸大服务效果", "不使用未授权素材"]
+  };
+
+  if (accountType === "restaurant") {
+    return {
+      targetUsers: ["本地到店用户", "游客", "家庭聚餐用户", "朋友聚会用户", "团建/宴请用户", "想找特色餐厅的用户"],
+      businessGoals: ["增加到店咨询", "提升团购转化", "推广主推菜", "推广套餐", "提升收藏", "增加评论互动"],
+      materialCondition: ["菜品图", "菜单/价格表", "包间图", "大厅图", "门头图", "停车场入口图", "活动海报"],
+      taboos: ["不伪造探店", "不伪造排队火爆", "不伪造顾客评价", "不虚构价格优惠", "不夸大食材等级", "不乱写营业时间/停车"]
+    };
+  }
+
+  if (accountType === "local_life_service") {
+    return {
+      targetUsers: ["准备结婚的新人", "正在比较服务的客户", "重视审美风格的用户", "需要预算透明的用户", "本地到店咨询用户", "老客转介绍用户"],
+      businessGoals: ["增加咨询", "提升预约", "展示真实案例", "建立信任", "推广套餐/活动", "促进到店沟通"],
+      materialCondition: ["真实案例图", "服务过程图", "门店/场地环境图", "客户授权图", "价格套餐图", "短视频素材", "资质/证书图"],
+      taboos: ["不伪造客户案例", "不使用未授权肖像", "不虚构价格/档期", "不夸大服务效果", "不伪造顾客评价", "不泄露客户隐私"]
+    };
+  }
+
+  if (accountType === "cultural_tourism_destination") {
+    return {
+      targetUsers: ["周末游客", "亲子家庭", "研学机构", "城市微度假用户", "外地旅行用户", "拍照打卡用户"],
+      businessGoals: ["提升收藏", "增加咨询", "促进票务转化", "促进活动报名", "推广路线", "提升目的地认知"],
+      materialCondition: ["现场图", "导览图", "票务截图", "活动海报", "交通图", "服务信息图", "游客授权图"],
+      taboos: ["不伪造开放状态", "不虚构活动现场", "不夸大人流热度", "不乱写票价/时间", "不使用未授权游客肖像"]
+    };
+  }
+
+  if (accountType === "hiking_diary") {
+    return {
+      targetUsers: ["新手户外用户", "进阶徒步用户", "周末出行用户", "想找靠谱路线的用户", "亲子户外用户", "装备党"],
+      businessGoals: ["提升收藏", "增加路线咨询", "沉淀关注", "推广路线资料", "建立专业信任", "促进社群活动"],
+      materialCondition: ["路线图", "轨迹截图", "真实现场图", "关键路况图", "装备图", "交通补给截图", "天气/开放状态截图"],
+      taboos: ["不伪造亲历", "不伪造登顶", "不伪造轨迹数据", "不淡化安全风险", "不乱写天气/开放状态", "不改变真实路况"]
+    };
+  }
+
+  return common;
+}
+
 function autoAccountParam(name: string, accountType: string, count = 0) {
   const latin = name
     .toLowerCase()
@@ -1304,6 +1351,7 @@ function AccountsPanel(props: {
   const field = (key: keyof typeof accountForm, value: string) => setAccountForm({ ...accountForm, [key]: value });
   const selectedTemplate = templates.find((template) => template.typeKey === accountForm.accountType);
   const defaults = accountTypeDefaults(accountForm.accountType, selectedTemplate);
+  const choices = accountChoiceOptions(accountForm.accountType);
   const fillDefaults = () => setAccountForm(hydrateAccountForm(accountForm, templates));
   return (
     <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
@@ -1340,29 +1388,33 @@ function AccountsPanel(props: {
             placeholder="一句话写清主营业务、核心服务或核心体验。例如：本地婚礼服务品牌，提供婚礼策划、现场布置和真实案例展示。"
             help="不会写可以先空着，系统会按客户类型自动补一句基础描述。"
           />
-          <Textarea
+          <MultiChoiceField
             label="想吸引谁"
             value={accountForm.targetUsers}
             onChange={(v) => field("targetUsers", v)}
-            placeholder={defaults.targetUsers}
+            options={choices.targetUsers}
+            placeholder="还有其他目标用户，可以写在这里"
           />
-          <Textarea
+          <MultiChoiceField
             label="现在最想达成什么"
             value={accountForm.businessGoals}
             onChange={(v) => field("businessGoals", v)}
-            placeholder={defaults.businessGoals}
+            options={choices.businessGoals}
+            placeholder="还有其他目标，可以写在这里"
           />
-          <Textarea
+          <MultiChoiceField
             label="已有素材"
             value={accountForm.materialCondition}
             onChange={(v) => field("materialCondition", v)}
-            placeholder={defaults.materialCondition}
+            options={choices.materialCondition}
+            placeholder="其他素材，例如航拍、直播切片、客户评价截图"
           />
-          <Textarea
+          <MultiChoiceField
             label="不能乱写什么"
             value={accountForm.taboos}
             onChange={(v) => field("taboos", v)}
-            placeholder={defaults.taboos}
+            options={choices.taboos}
+            placeholder="其他禁忌或品牌红线"
             help="例如不能伪造案例、价格、优惠、顾客评价、肖像授权、真实到店或服务效果。"
           />
         </div>
@@ -2603,6 +2655,63 @@ function MarkdownBox({ value }: { value: string }) {
 
 function EmptyState({ text = "还没有数据，请先创建账号。" }: { text?: string }) {
   return <div className="rounded border border-dashed border-ink/20 bg-white/60 p-8 text-center text-sm text-ink/60">{text}</div>;
+}
+
+function splitChoiceText(value: string) {
+  return value
+    .split(/[，,、；;\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function MultiChoiceField(props: {
+  label: string;
+  value: string;
+  options: string[];
+  placeholder?: string;
+  help?: string;
+  onChange: (value: string) => void;
+}) {
+  const tokens = splitChoiceText(props.value);
+  const selected = props.options.filter((option) => tokens.includes(option));
+  const extra = tokens.filter((item) => !props.options.includes(item)).join("、");
+  const write = (nextSelected: string[], nextExtra: string) => {
+    props.onChange([...nextSelected, ...splitChoiceText(nextExtra)].join("、"));
+  };
+
+  return (
+    <div className="field">
+      <span>{props.label}</span>
+      <div className="flex flex-wrap gap-2 rounded border border-ink/10 bg-white p-2">
+        {props.options.map((option) => {
+          const active = selected.includes(option);
+          return (
+            <button
+              key={option}
+              type="button"
+              onClick={() => {
+                const next = active ? selected.filter((item) => item !== option) : [...selected, option];
+                write(next, extra);
+              }}
+              className={clsx(
+                "rounded border px-3 py-2 text-sm transition",
+                active ? "border-teal/60 bg-teal/10 text-teal" : "border-ink/10 bg-white hover:border-teal/40 hover:bg-teal/5"
+              )}
+            >
+              {option}
+            </button>
+          );
+        })}
+      </div>
+      <input
+        value={extra}
+        placeholder={props.placeholder || "其他补充"}
+        onChange={(event) => write(selected, event.target.value)}
+        className="mt-2"
+      />
+      {props.help && <span className="text-xs leading-5 text-ink/50">{props.help}</span>}
+    </div>
+  );
 }
 
 function safeJsonArray(value: string) {
