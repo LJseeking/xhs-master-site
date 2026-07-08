@@ -156,6 +156,11 @@ type ImagePromptResult = {
   commands: Array<{ category: string; command: string; description: string; safetyNote: string }>;
 };
 
+type WeddingImagePlanResult = {
+  planningPrompt: { content: string; title: string; path: string };
+  commands: Array<{ category: string; command: string; description: string; safetyNote: string }>;
+};
+
 const mainTabs = [
   ["dashboard", "工作台", LayoutDashboard],
   ["accounts", "客户账号", ShieldCheck],
@@ -655,6 +660,7 @@ export function XhsMasterApp() {
   const [toast, setToast] = useState("");
   const [promptResults, setPromptResults] = useState<Record<number, PromptResult>>({});
   const [imagePromptResults, setImagePromptResults] = useState<Record<number, ImagePromptResult>>({});
+  const [weddingImagePlanResults, setWeddingImagePlanResults] = useState<Record<number, WeddingImagePlanResult>>({});
   const [selectedNoteId, setSelectedNoteId] = useState<number | null>(null);
   const [health, setHealth] = useState<any>(null);
   const [manifest, setManifest] = useState<{ content: string; validation: string; path: string } | null>(null);
@@ -1036,6 +1042,26 @@ export function XhsMasterApp() {
     }
   }
 
+  async function generateWeddingImagePlan(options?: { weeks?: string; openclawAssetsDir?: string; openclawImagePaths?: string; planningGoal?: string }) {
+    if (!selected) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/accounts/${selected.id}/wedding-image-plan`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(options || {})
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "生成婚礼批量图片规划失败。");
+      setWeddingImagePlanResults((current) => ({ ...current, [selected.id]: data }));
+      showToast("婚礼批量图片选题规划 Prompt 已生成。");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "生成婚礼批量图片规划失败。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function saveDraft(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedNote) return;
@@ -1238,6 +1264,8 @@ export function XhsMasterApp() {
               saveImageStyleStudy={saveImageStyleStudy}
               imagePromptResults={imagePromptResults}
               generateImagePrompt={generateImagePrompt}
+              weddingImagePlanResult={selected ? weddingImagePlanResults[selected.id] : null}
+              generateWeddingImagePlan={generateWeddingImagePlan}
               copy={copy}
               loading={loading}
             />
@@ -2085,6 +2113,13 @@ function PlanPreview({ plan }: { plan?: WeeklyPlan }) {
   );
 }
 
+function isWeddingUiAccount(account?: Account) {
+  if (!account) return false;
+  return /婚礼|婚庆|婚宴|婚纱|婚摄|婚照|备婚|新娘|新郎|新人|婚礼策划|婚礼布置|宴会设计|仪式区|甜品台|迎宾区/.test(
+    [account.name, account.personaBase, account.contentDirections, account.materialCondition, account.businessGoals, account.targetUsers].join(" ")
+  );
+}
+
 function ImagesPanel(props: {
   selected?: Account;
   plan?: WeeklyPlan;
@@ -2100,6 +2135,8 @@ function ImagesPanel(props: {
   saveImageStyleStudy: (event: React.FormEvent<HTMLFormElement>) => void;
   imagePromptResults: Record<number, ImagePromptResult>;
   generateImagePrompt: (task: NoteTask, options?: { openclawAssetsDir?: string; openclawImagePaths?: string }) => void;
+  weddingImagePlanResult?: WeddingImagePlanResult | null;
+  generateWeddingImagePlan: (options?: { weeks?: string; openclawAssetsDir?: string; openclawImagePaths?: string; planningGoal?: string }) => void;
   copy: (text: string) => void;
   loading: boolean;
 }) {
@@ -2113,6 +2150,8 @@ function ImagesPanel(props: {
     saveImageStyleStudy,
     imagePromptResults,
     generateImagePrompt,
+    weddingImagePlanResult,
+    generateWeddingImagePlan,
     copy,
     loading
   } = props;
@@ -2123,6 +2162,8 @@ function ImagesPanel(props: {
   const styleCommands = imageStyleDraft.commands || (latestStudy?.commandJson ? safeParseCommands(latestStudy.commandJson) : []);
   const stylePrompt = imageStyleDraft.researchPrompt || latestStudy?.researchPrompt || "";
   const copyText = assetUiCopy(selected?.accountType);
+  const isWedding = isWeddingUiAccount(selected);
+  const commandList = [...(weddingImagePlanResult?.commands || []), ...(result?.commands || [])];
 
   return (
     <div className="grid gap-5 xl:grid-cols-[0.42fr_0.58fr]">
@@ -2183,6 +2224,64 @@ function ImagesPanel(props: {
             </button>
           </form>
         </details>
+
+        {isWedding && (
+          <form
+            className="panel border-teal/30"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              generateWeddingImagePlan({
+                weeks: String(form.get("weeks") || "1"),
+                openclawAssetsDir: String(form.get("openclawAssetsDir") || ""),
+                openclawImagePaths: String(form.get("openclawImagePaths") || ""),
+                planningGoal: String(form.get("planningGoal") || "")
+              });
+            }}
+          >
+            <div className="mb-4">
+              <div className="mb-2 inline-flex rounded bg-teal/10 px-3 py-1 text-xs font-semibold text-teal">婚礼账号优先流程</div>
+              <h2 className="section-title">批量图片选题规划</h2>
+              <p className="mt-1 text-sm text-ink/60">
+                客户一次提供 30 张左右婚礼现场图时，先让龙虾读图识别细节，同时研究同行热门笔记，再输出一周或两周选题规划。
+              </p>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-[160px_1fr]">
+              <label className="field">
+                <span>规划周期</span>
+                <select name="weeks" defaultValue="1">
+                  <option value="1">一周规划</option>
+                  <option value="2">两周规划</option>
+                </select>
+              </label>
+              <Input name="openclawAssetsDir" label="婚礼图片文件夹" defaultValue={selected?.assetsPath || ""} placeholder="/Users/.../婚礼现场图" />
+            </div>
+
+            <div className="mt-3 grid gap-3">
+              <Textarea
+                name="planningGoal"
+                label="本次额外诉求"
+                placeholder="例如：重点挖掘婚礼蛋糕、法式花艺和仪式区细节；希望提升备婚咨询。留空则按图片自动判断。"
+                help="客户没有特殊要求也可以留空，系统会按图片里的可写细节自动规划。"
+              />
+              <Textarea
+                name="openclawImagePaths"
+                label="指定图片文件名或路径（可选）"
+                placeholder={"婚礼蛋糕.jpg\n香槟色花艺.jpg\n仪式区拱门.jpg\n迎宾牌.jpg"}
+                help="默认读取上面的文件夹。图片名越接近真实细节，龙虾越容易判断选题。"
+              />
+            </div>
+
+            <button type="submit" disabled={loading || !selected} className="primary-button mt-4">
+              <Sparkles size={17} /> 生成批量规划 Prompt
+            </button>
+
+            {weddingImagePlanResult?.planningPrompt.path && (
+              <div className="mt-3 rounded bg-teal/10 px-3 py-2 text-xs text-teal">{weddingImagePlanResult.planningPrompt.path}</div>
+            )}
+          </form>
+        )}
 
         <form
           className="panel"
@@ -2250,7 +2349,7 @@ function ImagesPanel(props: {
         <div className="panel">
           <h2 className="section-title">给龙虾的执行命令</h2>
           <div className="mt-3 space-y-3">
-            {(result?.commands || []).map((command) => (
+            {commandList.map((command) => (
               <div key={`${command.category}-${command.command}`} className="rounded border border-ink/10 bg-white p-3">
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <div>
@@ -2263,12 +2362,40 @@ function ImagesPanel(props: {
                 <div className="mt-2 text-xs text-coral">{command.safetyNote}</div>
               </div>
             ))}
-            {!result?.commands?.length && <EmptyState text="生成图片方案后，这里会显示可以复制给龙虾的执行命令。" />}
+            {!commandList.length && <EmptyState text={isWedding ? "先生成批量规划 Prompt，或生成单篇图片方案后，这里会显示可以复制给龙虾的执行命令。" : "生成图片方案后，这里会显示可以复制给龙虾的执行命令。"} />}
           </div>
         </div>
       </div>
 
       <div className="space-y-5">
+        {isWedding && (
+          <div className="panel border-teal/30">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h2 className="section-title">婚礼批量规划 Prompt</h2>
+                <p className="mt-1 text-sm text-ink/60">用于让龙虾先读 30 张婚礼图、研究同行热门笔记，再输出一周或两周内容规划。</p>
+              </div>
+              <div className="flex gap-2">
+                <IconButton title="复制批量规划 Prompt" onClick={() => copy(weddingImagePlanResult?.planningPrompt.content || "")} icon={<Clipboard size={17} />} />
+                <IconButton
+                  title="导出 Markdown"
+                  onClick={() => downloadText(`wedding-image-plan-${selected?.name || "draft"}.md`, weddingImagePlanResult?.planningPrompt.content || "")}
+                  icon={<Download size={17} />}
+                />
+              </div>
+            </div>
+            {weddingImagePlanResult?.planningPrompt.path && <div className="mb-2 rounded bg-teal/10 px-3 py-2 text-xs text-teal">{weddingImagePlanResult.planningPrompt.path}</div>}
+            <textarea
+              className="code-textarea min-h-[360px]"
+              value={
+                weddingImagePlanResult?.planningPrompt.content ||
+                "点击左侧“生成批量规划 Prompt”后，这里会显示完整任务说明：批量读图、同行爆款研究、一周/两周笔记规划、后续单篇 Prompt 和风险边界。"
+              }
+              readOnly
+            />
+          </div>
+        )}
+
         <div className="panel">
           <h2 className="section-title">图片风格摘要</h2>
           <p className="mt-1 text-sm text-ink/60">
