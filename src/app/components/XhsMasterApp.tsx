@@ -867,7 +867,7 @@ export function XhsMasterApp() {
     setReferenceDraft({ research: data.research, commands: data.commands, researchPrompt: data.researchPrompt });
     await refresh();
     setLoading(false);
-    showToast("参考账号研究已生成。");
+    showToast("爆款参考包已生成。");
   }
 
   async function saveReferenceResearch(event: React.FormEvent<HTMLFormElement>) {
@@ -895,7 +895,7 @@ export function XhsMasterApp() {
     await refresh();
     setProfileContent(data.account?.profile?.content || profileContent);
     setLoading(false);
-    showToast("已基于参考账号研究重生成策划案和配置文件。");
+    showToast("已基于爆款参考增强策划案和配置文件。");
   }
 
   async function prepareImageStyleStudy() {
@@ -1286,12 +1286,16 @@ function Dashboard({
   loading: boolean;
 }) {
   const cards = [
-    ["账号策划", selected?.strategy ? "已生成" : "待创建", "strategy"],
-    ["参考研究", selected?.referenceResearches?.[0]?.status || "待研究", "reference"],
-    ["配置文件", selected?.profile ? `v${selected.profile.version}` : "待生成", "agents"],
-    ["素材", `${selected?.assets?.length ?? 0}`, "assets"],
+    ["账号策划", selected?.strategy ? "已可用" : "待创建", "strategy"],
+    ["上传素材", `${selected?.assets?.length ?? 0}`, "assets"],
     ["本周内容", `${selected?.weeklyPlans?.[0]?.noteTasks?.length ?? 0} 篇`, "weekly"],
-    ["用户互动", selected?.interactionPlans?.[0]?.status || "待生成", "interactions"]
+    ["图片方案", selected?.weeklyPlans?.[0]?.noteTasks?.length ? "可生成" : "待计划", "images"],
+    ["笔记草稿", selected?.weeklyPlans?.[0]?.noteTasks?.length ? "可生成" : "待计划", "prompts"],
+    ["发布互动", selected?.interactionPlans?.[0]?.status || "可选", "interactions"]
+  ];
+  const optionalCards = [
+    ["爆款参考", selected?.referenceResearches?.[0]?.status || "可选增强", "reference"],
+    ["配置文件", selected?.profile ? `v${selected.profile.version}` : "自动生成", "agents"]
   ];
   return (
     <div className="space-y-5">
@@ -1323,6 +1327,22 @@ function Dashboard({
             <div className="mt-3 text-2xl font-semibold">{value}</div>
           </button>
         ))}
+      </div>
+      <div className="panel">
+        <div className="mb-3">
+          <h2 className="text-lg font-semibold">可选增强</h2>
+          <p className="mt-1 text-sm text-ink/60">
+            创建账号后策划已经可用，可以直接进入素材、本周内容、图片方案和笔记草稿。爆款参考只在需要校准同行风格时再做。
+          </p>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          {optionalCards.map(([label, value, tab]) => (
+            <button key={label} type="button" onClick={() => setActiveTab(tab)} className="rounded border border-ink/10 bg-white p-3 text-left transition hover:border-teal/40 hover:bg-teal/5">
+              <div className="text-sm text-ink/55">{label}</div>
+              <div className="mt-1 text-lg font-semibold">{value}</div>
+            </button>
+          ))}
+        </div>
       </div>
       <div className="panel">
         <div className="mb-3 flex items-center gap-2 text-lg font-semibold">
@@ -1507,19 +1527,19 @@ function ReferenceResearchPanel(props: {
       <div className="panel">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h2 className="section-title">参考账号研究</h2>
+            <h2 className="section-title">爆款参考增强（可选）</h2>
             <p className="mt-1 max-w-3xl text-sm text-ink/60">
-              这页只做一件事：按当前账号类型寻找参考账号，分析它们的图片、标题和评论问题，再生成差异化策划。
+              账号创建后策划已经可用；这页只在需要吸收同类型爆款风格、标题结构、图片顺序和评论痛点时使用。研究结果会增强后续策划、图片方案和正文草稿，但不阻塞主流程。
             </p>
           </div>
           <button type="button" onClick={prepareReferenceResearch} disabled={loading} className="primary-button">
-            <Search size={17} /> 生成研究包
+            <Search size={17} /> 生成爆款参考包
           </button>
         </div>
 
         <div className="grid gap-3 md:grid-cols-3">
           <div className={clsx("rounded border p-4", hasSearchPack ? "border-teal/30 bg-teal/5" : "border-ink/10 bg-white")}>
-            <div className="text-xs font-medium text-ink/55">1. 搜索包</div>
+            <div className="text-xs font-medium text-ink/55">1. 搜索要求</div>
             <div className="mt-2 font-semibold">{hasSearchPack ? "已生成" : "待生成"}</div>
             <p className="mt-2 text-sm text-ink/60">复制研究要求给搜索工具，只读搜索参考账号。</p>
           </div>
@@ -1529,9 +1549,9 @@ function ReferenceResearchPanel(props: {
             <p className="mt-2 text-sm text-ink/60">把搜索、主页和评论分析结果粘回右侧输入区。</p>
           </div>
           <div className={clsx("rounded border p-4", hasSummary ? "border-teal/30 bg-teal/5" : "border-ink/10 bg-white")}>
-            <div className="text-xs font-medium text-ink/55">3. 大模型重生成</div>
-            <div className="mt-2 font-semibold">{hasSummary ? "已完成" : "待分析"}</div>
-            <p className="mt-2 text-sm text-ink/60">大模型总结参考账号，并重写策划案和配置文件。</p>
+            <div className="text-xs font-medium text-ink/55">3. 增强策划</div>
+            <div className="mt-2 font-semibold">{hasSummary ? "已增强" : "可选"}</div>
+            <p className="mt-2 text-sm text-ink/60">大模型总结参考结果，用于增强策划、图片方案和正文草稿。</p>
           </div>
         </div>
 
@@ -1547,7 +1567,7 @@ function ReferenceResearchPanel(props: {
         <div className="panel">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <h2 className="section-title">给 xiaohongshu_auto_op 的研究包</h2>
+              <h2 className="section-title">给 xiaohongshu_auto_op 的参考包</h2>
               <p className="mt-1 text-sm text-ink/60">通常只需要复制“命令包”和“研究要求”各一次。</p>
             </div>
             <div className="flex gap-2">
@@ -1557,7 +1577,7 @@ function ReferenceResearchPanel(props: {
           </div>
 
           {!hasSearchPack ? (
-            <EmptyState text="先点击“生成研究包”。这里会出现可复制的命令和研究要求。" />
+            <EmptyState text="可选步骤：点击“生成爆款参考包”后，这里会出现可复制的命令和研究要求。" />
           ) : (
             <div className="space-y-3">
               <div className="rounded border border-ink/10 bg-white p-3">
@@ -1593,8 +1613,8 @@ function ReferenceResearchPanel(props: {
         </div>
 
         <form className="panel" onSubmit={saveReferenceResearch}>
-          <h2 className="section-title">粘贴结果，大模型接着做</h2>
-          <p className="mt-1 text-sm text-ink/60">这里才是主要输入区。把 xiaohongshu_auto_op 返回的研究报告粘进来，然后让大模型总结并重生成。</p>
+          <h2 className="section-title">粘贴参考结果，增强现有策划</h2>
+          <p className="mt-1 text-sm text-ink/60">把 xiaohongshu_auto_op 返回的研究报告粘进来，大模型会提炼可借鉴的爆款风格，并更新当前策划。没有参考结果也可以继续主流程。</p>
           <div className="mt-4 grid gap-3">
             <label className="field">
               <span>重点参考账号</span>
@@ -1617,9 +1637,9 @@ function ReferenceResearchPanel(props: {
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <button type="submit" disabled={loading} className="primary-button">
-              <Sparkles size={17} /> 用大模型总结并重生成
+              <Sparkles size={17} /> 保存研究并增强策划
             </button>
-            <span className="text-xs text-ink/55">成功后会重写策划案和账号配置文件。</span>
+            <span className="text-xs text-ink/55">成功后会更新策划案和账号配置文件；不需要也可以跳过。</span>
           </div>
         </form>
       </div>
@@ -1644,7 +1664,7 @@ function ReferenceResearchPanel(props: {
         {hasSummary ? (
           <MarkdownBox value={summaryMarkdown} />
         ) : (
-          <EmptyState text="还没有研究结论。先生成研究包，复制给 xiaohongshu_auto_op，再把返回结果粘回来。" />
+          <EmptyState text="还没有参考结论。这是可选增强，不影响你继续生成本周内容、图片方案和笔记草稿。" />
         )}
       </div>
     </div>
