@@ -501,6 +501,102 @@ function emptyAccountForm(templates: Template[]) {
   };
 }
 
+function accountTypeDefaults(accountType: string, template?: Template) {
+  const columns = template ? safeJsonArray(template.defaultColumns).join("、") : "";
+  const common = {
+    targetUsers: "有明确需求、正在比较选择、希望先看真实案例和价格边界的用户",
+    painPoints: "不知道是否靠谱、价格是否透明、案例是否真实、怎么预约、效果是否能落地",
+    contentDirections: columns || "真实案例、服务流程、价格问答、用户顾虑、素材展示",
+    businessGoals: "提升收藏、增加咨询、建立信任、促进预约或到店转化",
+    monetization: "咨询转化、预约服务、套餐成交、私域跟进",
+    materialCondition: "门店/现场图、服务过程图、案例图、产品图、环境图、价格或活动信息图",
+    taboos: "不能伪造真实案例、顾客评价、价格、优惠、资质、档期、素材授权或服务效果"
+  };
+
+  if (accountType === "restaurant") {
+    return {
+      targetUsers: "本地到店用户、游客、家庭聚餐用户、朋友聚会用户、想找特色餐厅的用户",
+      painPoints: "不知道点什么、价格是否清楚、环境是否适合、停车交通是否方便、活动规则是否真实",
+      contentDirections: "招牌菜种草、套餐场景、门店环境、菜单上新、在地风味、停车交通、顾客问答",
+      businessGoals: "增加到店咨询、提升团购/套餐转化、推广主推菜、提升收藏和评论",
+      monetization: "团购转化、预约到店、套餐售卖、节日活动、私域会员",
+      materialCondition: "菜品图、菜单/价格表、包间/大厅图、门头图、停车场入口图、活动海报",
+      taboos: "不能伪造探店、排队火爆、顾客评价、价格优惠、食材等级、营业时间或停车便利性"
+    };
+  }
+
+  if (accountType === "local_life_service") {
+    return {
+      targetUsers: "有明确本地服务需求、正在比较门店、希望先看真实案例和价格边界的用户",
+      painPoints: "预算不透明、案例是否真实、现场效果是否落地、流程是否省心、服务是否靠谱",
+      contentDirections: "真实案例、服务流程、风格细节、预算避坑、门店空间、预约问答、客户顾虑",
+      businessGoals: "增加咨询、提升预约、展示案例、建立信任、促进到店沟通",
+      monetization: "服务咨询、套餐预约、到店沟通、定制方案、私域跟进",
+      materialCondition: "真实案例图、服务过程图、场地/门店环境图、客户授权图、价格套餐图、短视频素材",
+      taboos: "不能伪造真实客户案例，不能使用未授权肖像，不能夸大服务效果，不能虚构价格、档期和资质"
+    };
+  }
+
+  if (accountType === "cultural_tourism_destination") {
+    return {
+      targetUsers: "周末游客、亲子家庭、研学机构、城市微度假用户、外地旅行用户",
+      painPoints: "值不值得去、怎么玩、交通票务是否方便、开放时间是否准确、是否适合亲子或拍照",
+      contentDirections: "目的地动线、核心看点、活动现场、拍照机位、交通票务、避坑问答",
+      businessGoals: "提升收藏、增加咨询、促进票务/活动/路线转化",
+      monetization: "票务、活动报名、线路产品、研学团建、本地商户转化",
+      materialCondition: "现场图、导览图、票务截图、活动海报、交通图、服务信息图",
+      taboos: "不能伪造开放状态、活动现场、人流热度、票价、交通和游客肖像授权"
+    };
+  }
+
+  if (accountType === "hiking_diary") {
+    return {
+      targetUsers: "想找靠谱路线的新手户外用户、进阶徒步用户、周末出行用户",
+      painPoints: "不知道路线难度、距离爬升、交通补给、季节窗口、是否适合自己",
+      contentDirections: "路线日记、路线攻略、风景图集、装备复盘、交通补给、安全提醒",
+      businessGoals: "提升收藏、增加路线咨询、沉淀关注和路线资料需求",
+      monetization: "路线资料包、社群活动、装备合作、旅行咨询",
+      materialCondition: "路线图、轨迹截图、真实现场图、关键路况图、装备图、交通补给截图",
+      taboos: "不能伪造亲历、登顶、轨迹数据、天气、开放状态、危险路况或他人评价"
+    };
+  }
+
+  return common;
+}
+
+function autoAccountParam(name: string, accountType: string, count = 0) {
+  const latin = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 24);
+  if (latin) return latin;
+  const prefix = accountType.split("_")[0] || "brand";
+  return `${prefix}-${String(count + 1).padStart(2, "0")}`;
+}
+
+function hydrateAccountForm(form: ReturnType<typeof emptyAccountForm>, templates: Template[], count = 0) {
+  const template = templates.find((item) => item.typeKey === form.accountType);
+  const defaults = accountTypeDefaults(form.accountType, template);
+  const typeName = template?.name || "小红书运营客户";
+  const personaBase =
+    form.personaBase.trim() ||
+    `${form.name || "该客户"}是${form.city ? `${form.city}的` : ""}${typeName}客户，需要通过真实素材、真实案例和清楚的服务信息运营小红书账号。`;
+
+  return {
+    ...form,
+    accountParam: form.accountParam.trim() || autoAccountParam(form.name, form.accountType, count),
+    personaBase,
+    targetUsers: form.targetUsers.trim() || defaults.targetUsers,
+    painPoints: form.painPoints.trim() || defaults.painPoints,
+    contentDirections: form.contentDirections.trim() || defaults.contentDirections,
+    businessGoals: form.businessGoals.trim() || defaults.businessGoals,
+    monetization: form.monetization.trim() || defaults.monetization,
+    materialCondition: form.materialCondition.trim() || defaults.materialCondition,
+    taboos: form.taboos.trim() || defaults.taboos
+  };
+}
+
 export function XhsMasterApp() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -565,10 +661,11 @@ export function XhsMasterApp() {
   async function createAccount() {
     setLoading(true);
     try {
+      const payload = hydrateAccountForm(accountForm, templates, accounts.length);
       const res = await fetch("/api/accounts", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(accountForm)
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "创建失败");
@@ -1205,15 +1302,29 @@ function AccountsPanel(props: {
 }) {
   const { templates, accountForm, setAccountForm, createAccount, loading } = props;
   const field = (key: keyof typeof accountForm, value: string) => setAccountForm({ ...accountForm, [key]: value });
+  const selectedTemplate = templates.find((template) => template.typeKey === accountForm.accountType);
+  const defaults = accountTypeDefaults(accountForm.accountType, selectedTemplate);
+  const fillDefaults = () => setAccountForm(hydrateAccountForm(accountForm, templates));
   return (
     <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
       <div className="panel">
-        <h2 className="section-title">创建账号</h2>
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="section-title">快速创建客户账号</h2>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-ink/60">
+              只需要先填客户是谁、做什么、在哪、想吸引谁。空白的细节会按账号类型自动补齐，后面还能再改。
+            </p>
+          </div>
+          <button type="button" onClick={fillDefaults} className="secondary-button">
+            <Sparkles size={17} /> 自动补全空白项
+          </button>
+        </div>
+
         <div className="grid gap-3 md:grid-cols-2">
-          <Input label="账号名称" value={accountForm.name} onChange={(v) => field("name", v)} placeholder="例如 长歌行 / X 的徒步日记" />
-          <Input label="内部账号代号" value={accountForm.accountParam} onChange={(v) => field("accountParam", v)} placeholder="例如 brand-a / x-hiking-diary" />
-          <label className="field">
-            <span>账号类型</span>
+          <Input label="客户/账号名称" value={accountForm.name} onChange={(v) => field("name", v)} placeholder="例如 灼悦婚礼 / 长歌行 / X 的徒步日记" />
+          <Input label="所在城市/区域" value={accountForm.city} onChange={(v) => field("city", v)} placeholder="例如 杭州 / 大理 / 上海静安" />
+          <label className="field md:col-span-2">
+            <span>客户类型</span>
             <select value={accountForm.accountType} onChange={(e) => field("accountType", e.target.value)}>
               {templates.map((template) => (
                 <option key={template.typeKey} value={template.typeKey}>
@@ -1222,37 +1333,91 @@ function AccountsPanel(props: {
               ))}
             </select>
           </label>
-          <label className="field">
-            <span>账号阶段</span>
-            <select value={accountForm.stage} onChange={(e) => field("stage", e.target.value)}>
-              {["冷启动", "成长期", "商业化期"].map((stage) => (
-                <option key={stage}>{stage}</option>
-              ))}
-            </select>
-          </label>
-          <Input label="所在城市/区域" value={accountForm.city} onChange={(v) => field("city", v)} />
-          <Input label="运营目标" value={accountForm.businessGoals} onChange={(v) => field("businessGoals", v)} placeholder="例如：提升收藏 / 增加预约 / 活动报名 / 到店转化 / 产品咨询" />
-          <Textarea label="账号基础描述" value={accountForm.personaBase} onChange={(v) => field("personaBase", v)} placeholder="写清客户业态、核心体验、所在地、服务半径和账号气质，例如文旅景区、民俗体验、民宿营地、在地餐饮" />
-          <Textarea label="目标用户" value={accountForm.targetUsers} onChange={(v) => field("targetUsers", v)} placeholder="亲子家庭 / 周末游客 / 研学机构 / 本地到店用户 / 新手户外用户 / 伴手礼购买者" />
-          <Textarea label="用户顾虑" value={accountForm.painPoints} onChange={(v) => field("painPoints", v)} placeholder="值不值得去 / 怎么预约 / 交通票务 / 价格房态 / 授权真实性 / 不知道点什么 / 路线难度" />
-          <Textarea label="内容方向" value={accountForm.contentDirections} onChange={(v) => field("contentDirections", v)} placeholder="目的地动线、民俗工艺、活动现场、房型空间、在地美食、路线攻略、展览研学、文创产品" />
-          <Textarea label="商业化方式" value={accountForm.monetization} onChange={(v) => field("monetization", v)} placeholder="票务、活动报名、体验预约、订房、团购、线路资料包、研学课程、产品销售" />
-          <Textarea label="参考账号" value={accountForm.referenceAccounts} onChange={(v) => field("referenceAccounts", v)} />
-          <Textarea label="已有素材情况" value={accountForm.materialCondition} onChange={(v) => field("materialCondition", v)} placeholder="现场图、导览图、票务截图、工艺细节、授权人物图、房型图、菜品图、路线图、产品图" />
-          <Textarea label="运营禁忌" value={accountForm.taboos} onChange={(v) => field("taboos", v)} placeholder="不能伪造亲历、探店、活动现场、传承人、房型、轨迹、顾客评价或未经授权的素材" />
+          <Textarea
+            label="客户主要做什么"
+            value={accountForm.personaBase}
+            onChange={(v) => field("personaBase", v)}
+            placeholder="一句话写清主营业务、核心服务或核心体验。例如：本地婚礼服务品牌，提供婚礼策划、现场布置和真实案例展示。"
+            help="不会写可以先空着，系统会按客户类型自动补一句基础描述。"
+          />
+          <Textarea
+            label="想吸引谁"
+            value={accountForm.targetUsers}
+            onChange={(v) => field("targetUsers", v)}
+            placeholder={defaults.targetUsers}
+          />
+          <Textarea
+            label="现在最想达成什么"
+            value={accountForm.businessGoals}
+            onChange={(v) => field("businessGoals", v)}
+            placeholder={defaults.businessGoals}
+          />
+          <Textarea
+            label="已有素材"
+            value={accountForm.materialCondition}
+            onChange={(v) => field("materialCondition", v)}
+            placeholder={defaults.materialCondition}
+          />
+          <Textarea
+            label="不能乱写什么"
+            value={accountForm.taboos}
+            onChange={(v) => field("taboos", v)}
+            placeholder={defaults.taboos}
+            help="例如不能伪造案例、价格、优惠、顾客评价、肖像授权、真实到店或服务效果。"
+          />
         </div>
-        <button type="button" onClick={createAccount} disabled={loading || !accountForm.name || !accountForm.accountParam} className="primary-button mt-4">
-          <Plus size={17} /> 创建账号并生成策划
-        </button>
+
+        <details className="mt-4 rounded border border-ink/10 bg-white p-3">
+          <summary className="cursor-pointer text-sm font-medium">
+            高级补充
+            <span className="ml-2 text-xs font-normal text-ink/50">需要更精细时再展开</span>
+          </summary>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <Input
+              label="内部账号代号"
+              value={accountForm.accountParam}
+              onChange={(v) => field("accountParam", v)}
+              placeholder="可不填，系统会自动生成，例如 brand-01"
+            />
+            <label className="field">
+              <span>账号阶段</span>
+              <select value={accountForm.stage} onChange={(e) => field("stage", e.target.value)}>
+                {["冷启动", "成长期", "商业化期"].map((stage) => (
+                  <option key={stage}>{stage}</option>
+                ))}
+              </select>
+            </label>
+            <Textarea label="用户顾虑" value={accountForm.painPoints} onChange={(v) => field("painPoints", v)} placeholder={defaults.painPoints} />
+            <Textarea label="内容方向" value={accountForm.contentDirections} onChange={(v) => field("contentDirections", v)} placeholder={defaults.contentDirections} />
+            <Textarea label="商业化方式" value={accountForm.monetization} onChange={(v) => field("monetization", v)} placeholder={defaults.monetization} />
+            <Textarea label="参考账号" value={accountForm.referenceAccounts} onChange={(v) => field("referenceAccounts", v)} placeholder="账号名 / 主页链接 / 想参考的原因。不确定可以留空。" />
+          </div>
+        </details>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button type="button" onClick={createAccount} disabled={loading || !accountForm.name} className="primary-button">
+            <Plus size={17} /> {loading ? "正在生成..." : "创建账号并生成策划"}
+          </button>
+          <span className="text-xs leading-5 text-ink/50">最少只填客户名称也能创建；填写主营业务和目标用户会更准。</span>
+        </div>
       </div>
       <div className="panel">
-        <h2 className="section-title">内置账号类型</h2>
+        <h2 className="section-title">选择客户类型</h2>
+        <p className="mt-1 text-sm text-ink/60">点选后，左侧占位示例和自动补全规则会跟着切换。</p>
         <div className="space-y-2">
           {templates.map((template) => (
-            <div key={template.typeKey} className="rounded border border-ink/10 bg-white p-3">
+            <button
+              key={template.typeKey}
+              type="button"
+              onClick={() => field("accountType", template.typeKey)}
+              className={clsx(
+                "w-full rounded border bg-white p-3 text-left transition hover:border-teal/40 hover:bg-teal/5",
+                accountForm.accountType === template.typeKey ? "border-teal/60 bg-teal/5 ring-2 ring-teal/15" : "border-ink/10"
+              )}
+            >
               <div className="font-medium">{template.name}</div>
               <div className="mt-1 text-xs text-ink/60">{safeJsonArray(template.defaultColumns).join(" / ")}</div>
-            </div>
+            </button>
           ))}
         </div>
       </div>
