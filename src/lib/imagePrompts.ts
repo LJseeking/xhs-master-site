@@ -35,6 +35,18 @@ export function isHikingAccountType(accountType: string) {
   return accountVisualMode(accountType) === "outdoor";
 }
 
+export function isWeddingAccount(account: Pick<Account, "name" | "personaBase" | "contentDirections" | "materialCondition" | "businessGoals" | "targetUsers">) {
+  const text = [
+    account.name,
+    account.personaBase,
+    account.contentDirections,
+    account.materialCondition,
+    account.businessGoals,
+    account.targetUsers
+  ].join(" ");
+  return /婚礼|婚庆|婚宴|婚纱|婚摄|婚照|备婚|新娘|新郎|新人|婚礼策划|婚礼布置|宴会设计|仪式区|甜品台|迎宾区/.test(text);
+}
+
 const strategyByMode: Record<AccountVisualMode, VisualStrategy> = {
   culture_tourism: {
     modeName: "文旅目的地图文协同图集",
@@ -94,8 +106,20 @@ const strategyByMode: Record<AccountVisualMode, VisualStrategy> = {
   }
 };
 
+const weddingVisualStrategy: VisualStrategy = {
+  modeName: "婚礼图片细节拆解图文",
+  coverStyle: "真实婚礼现场细节做视觉锚点，优先选择婚礼蛋糕、甜品台、花艺、仪式区、迎宾牌、桌花、席位卡、手捧花、灯光布幔等一个高记忆点；后期叠加风格关键词、细节名称和备婚收藏理由。",
+  imageSetStyle: "默认 5 张：封面婚礼细节图、同场景远景/关系图、细节近景拆解、风格/预算/适合人群信息卡、备婚 FAQ/咨询引导卡。",
+  highEngagementRules: ["图片先判断细节，再定选题，不要先写泛泛婚礼服务", "一篇只聚焦一个可被新人收藏的细节", "爆款风格要学习标题节奏、细节命名和情绪表达，不能照搬文案", "真实案例和新人肖像必须授权", "价格、档期、场地和套餐只写已确认信息"],
+  avoid: ["不要伪造真实婚礼案例", "不要使用未授权新人/宾客肖像", "不要夸大落地效果", "不要虚构价格档期和场地信息", "不要把 AI 图当真实案例"]
+};
+
 function strategyFor(accountType: string) {
   return strategyByMode[accountVisualMode(accountType)];
+}
+
+function strategyForAccount(account: Account) {
+  return isWeddingAccount(account) ? weddingVisualStrategy : strategyFor(account.accountType);
 }
 
 function modeCopy(accountType: string) {
@@ -194,6 +218,20 @@ function modeCopy(accountType: string) {
   return copy[mode];
 }
 
+function modeCopyForAccount(account: Account) {
+  if (!isWeddingAccount(account)) return modeCopy(account.accountType);
+  return {
+    sourceHint: "优先按文件名和画面内容识别婚礼细节：婚礼蛋糕、甜品台、花艺、仪式区、迎宾牌、桌花、席位卡、手捧花、灯光、布幔、合影区、誓言本、戒指、请柬、菜单卡。先判断每张图能写成哪个小红书选题，再选一个最有收藏价值的细节做单篇主题。",
+    noSourceHint: "未提供图片：请先输出婚礼素材整理清单，要求客户提供真实婚礼现场图，并按细节命名，例如 婚礼蛋糕.jpg、香槟色花艺.jpg、仪式区拱门.jpg、迎宾牌.jpg、桌花.jpg；如必须出图，只能生成“AI 示意图”，不得伪装为真实婚礼案例。",
+    promptTitle: "婚礼图片细节拆解执行 Prompt",
+    imageAnchorRule: "真实婚礼图片是选题入口和视觉锚点；AI 只能做轻度补光、构图、背景延展和信息卡排版，不得改变婚礼现场核心设计、花材、蛋糕、场地结构和新人肖像。",
+    textRule: "先读图识别细节，再围绕一个细节写笔记：蛋糕讲层数、色系、装饰和适合风格；花艺讲花材、色系、空间层次和仪式感；仪式区讲动线、背景、灯光和拍照效果；迎宾区/席位卡/菜单卡讲宾客体验和高级感。正文必须参考同类型爆款文章的标题节奏、细节命名、情绪表达和收藏理由，但不得照搬原文。",
+    factRule: "禁止伪造真实新人案例、宾客反馈、价格、档期、场地、套餐、花材成本、婚礼效果和肖像授权；未确认信息写待确认。",
+    defaultStyleBrief: ["封面必须以真实婚礼细节图为锚点。", "一篇只讲一个细节，如婚礼蛋糕、花艺、仪式区、迎宾区或桌面布置。", "先判断图片里的可写点，再生成标题、图上短字和正文。", "参考爆款风格但不照搬文案，重点学习标题节奏和收藏理由。", "新人/宾客肖像、场地和价格必须人工核验。"],
+    layoutRules: ["封面：婚礼细节占主体，短字写“细节名 + 风格关键词 + 备婚收藏理由”。", "细节拆解图：用 2-4 个短标签标出色系、材质、花材、层次、场景作用。", "关系图：展示该细节在全场婚礼中的位置，帮助新人理解落地效果。", "信息卡：列出适合婚礼风格、预算/档期/场地待确认项、适合人群和咨询问题。", "不要在图上暴露新人隐私、手机号、真实合同价格和未授权肖像。"]
+  };
+}
+
 function imageStructureFor(accountType: string) {
   const strategy = strategyFor(accountType);
   const mode = accountVisualMode(accountType);
@@ -274,12 +312,37 @@ function imageStructureFor(accountType: string) {
   };
 }
 
+function weddingImageStructure() {
+  return {
+    name: weddingVisualStrategy.modeName,
+    countRule: "默认输出 5 张图；如果素材特别多，也不要做大而全图集，必须围绕一个婚礼细节完成“封面吸引 + 细节拆解 + 场景关系 + 信息卡 + FAQ”。",
+    items: [
+      "图 1｜封面婚礼细节图：从真实图片中选择最有记忆点的蛋糕、花艺、仪式区、迎宾区、桌花或甜品台。",
+      "图 2｜场景关系图：展示这个细节在整场婚礼中的位置，例如仪式区全景、桌面整体、甜品台全貌。",
+      "图 3｜细节近景拆解图：放大材质、花材、层次、色系、蛋糕装饰、灯光或纸品细节。",
+      "图 4｜风格/预算/适合人群信息卡：说明适合的婚礼风格、季节、场地类型和需人工确认的价格/档期。",
+      "图 5｜备婚 FAQ/咨询引导卡：引导新人留言预算、城市、婚期、场地和喜欢的风格。"
+    ],
+    layoutRules: [
+      weddingVisualStrategy.coverStyle,
+      "图片和正文必须一一对应，图里出现什么婚礼细节，正文就讲什么细节判断。",
+      "中文标题、标签、预算、档期、场地和授权提示全部后期叠加，image2 不直接生成文字。",
+      "禁止伪造新人肖像授权、真实案例效果、价格、档期和场地信息。",
+      "所有影响咨询、预算和落地判断的信息都要进入人工核验清单。"
+    ]
+  };
+}
+
+function imageStructureForAccount(account: Account) {
+  return isWeddingAccount(account) ? weddingImageStructure() : imageStructureFor(account.accountType);
+}
+
 type ReferenceResearchLike = Pick<
   AccountReferenceResearch,
   "contentFeatures" | "summaryMarkdown" | "selectedAccounts" | "rawResults"
 > | null | undefined;
 
-function compactResearchLines(research: ReferenceResearchLike, accountType: string) {
+function compactResearchLines(research: ReferenceResearchLike, accountType: string, wedding = false) {
   const text = [research?.contentFeatures, research?.summaryMarkdown, research?.selectedAccounts, research?.rawResults]
     .filter(Boolean)
     .join("\n");
@@ -287,6 +350,7 @@ function compactResearchLines(research: ReferenceResearchLike, accountType: stri
 
   const mode = accountVisualMode(accountType);
   const common = ["图", "图片", "封面", "视觉", "构图", "实拍", "滤镜", "色调", "信息卡", "小红书"];
+  const weddingKeywords = ["婚礼", "婚庆", "备婚", "新人", "新娘", "蛋糕", "甜品台", "花艺", "仪式区", "迎宾", "桌花", "席位卡", "灯光", "布幔", "风格", "案例"];
   const modeKeywords: Record<AccountVisualMode, string[]> = {
     culture_tourism: ["文旅", "景区", "街区", "目的地", "路线", "票务", "活动", "交通", "拍照"],
     heritage: ["民俗", "非遗", "工艺", "传承", "体验", "节庆", "作品", "手作"],
@@ -297,7 +361,7 @@ function compactResearchLines(research: ReferenceResearchLike, accountType: stri
     product: ["产品", "文创", "特产", "包装", "产地", "工艺", "礼盒", "价格"],
     service: ["服务", "案例", "流程", "设备", "价格", "预约", "门店", "资质"]
   };
-  const visualKeywords = [...common, ...modeKeywords[mode]];
+  const visualKeywords = [...common, ...(wedding ? weddingKeywords : modeKeywords[mode])];
   const lines = text
     .split(/\n|。|；|;/)
     .map((line) =>
@@ -314,8 +378,8 @@ function compactResearchLines(research: ReferenceResearchLike, accountType: stri
 }
 
 export function buildImageStyleStudy(account: Account, research: ReferenceResearchLike) {
-  const strategy = strategyFor(account.accountType);
-  const researchLines = compactResearchLines(research, account.accountType);
+  const strategy = strategyForAccount(account);
+  const researchLines = compactResearchLines(research, account.accountType, isWeddingAccount(account));
   const learned = researchLines.length
     ? researchLines
     : ["参考研究暂未形成明确图片结论，先采用该客户业态的图文协同规律。", strategy.coverStyle, strategy.imageSetStyle];
@@ -340,10 +404,10 @@ ${learned.map((line) => `- ${line}`).join("\n")}
 }
 
 export function buildCompactImageStyleBrief(account: Account, research: ReferenceResearchLike) {
-  const strategy = strategyFor(account.accountType);
-  const structure = imageStructureFor(account.accountType);
-  const copy = modeCopy(account.accountType);
-  const researchLines = compactResearchLines(research, account.accountType).slice(0, 3);
+  const strategy = strategyForAccount(account);
+  const structure = imageStructureForAccount(account);
+  const copy = modeCopyForAccount(account);
+  const researchLines = compactResearchLines(research, account.accountType, isWeddingAccount(account)).slice(0, 3);
   const rules = [
     `统一视觉：${structure.name}`,
     structure.countRule,
@@ -363,9 +427,10 @@ export function buildImagePrompt(input: {
   openclawImagePaths?: string;
 }) {
   const { account, noteTask, styleBrief, openclawAssetsDir, openclawImagePaths } = input;
-  const strategy = strategyFor(account.accountType);
-  const structure = imageStructureFor(account.accountType);
-  const copy = modeCopy(account.accountType);
+  const strategy = strategyForAccount(account);
+  const structure = imageStructureForAccount(account);
+  const copy = modeCopyForAccount(account);
+  const wedding = isWeddingAccount(account);
   const compactStyle = styleBrief?.length ? styleBrief : [...strategy.highEngagementRules.slice(0, 3), ...copy.defaultStyleBrief];
   const styleExtras = compactStyle
     .filter((item) => !/统一视觉|默认输出|默认\s*5|封面必须以真实/.test(item))
@@ -390,6 +455,7 @@ export function buildImagePrompt(input: {
 - ${structure.countRule}
 - ${copy.imageAnchorRule}
 - ${copy.factRule}
+- ${wedding ? "必须先对真实婚礼图片做画面判断：列出可写细节候选，并选择一个最适合小红书爆款风格的细节作为本篇主轴。" : "先判断真实素材是否匹配本篇选题，再决定图集顺序。"}
 - image2 不直接生成中文文字；标题、价格、路线、票务、标签、风险提示全部后期叠加。
 - 严禁把“AI 生成/AI 示意/真实性标记”等来源说明放到图片上；这些只写在内部审核备注。
 ${styleExtras.length ? `- ${styleExtras.join("\n- ")}` : ""}

@@ -1,5 +1,5 @@
 import type { Account, AccountStrategy, NoteTask, WeeklyPlan } from "@prisma/client";
-import { accountVisualMode, type AccountVisualMode } from "@/lib/imagePrompts";
+import { accountVisualMode, isWeddingAccount, type AccountVisualMode } from "@/lib/imagePrompts";
 
 export function buildTaskPrompt(input: {
   account: Account;
@@ -151,13 +151,22 @@ function buildModeTaskPrompt(input: {
   const mode = accountVisualMode(input.account.accountType);
   const copy = promptModeCopy[mode];
   const imageCountLine = mode === "food" ? "图集默认 6 张" : "图集默认 5 张";
+  const weddingRules = isWeddingAccount(input.account)
+    ? [
+        "这是婚礼公司小红书发布稿，图片是选题入口，不是只做服务介绍。",
+        "必须先根据图集判断可写细节：婚礼蛋糕、甜品台、花艺、仪式区、迎宾区、桌花、席位卡、手捧花、灯光布幔、纸品、场地动线等。",
+        "每篇只聚焦一个细节，把它写成备婚用户想收藏的风格灵感、落地判断或避坑笔记。",
+        "参考同类型爆款文章的标题节奏、情绪表达、细节命名和收藏理由，但不得照搬原文或伪造数据。",
+        "不能伪造新人反馈、真实案例授权、价格、档期、场地、花材成本和最终落地效果；未确认信息写待确认。"
+      ]
+    : [];
   return `# ${copy.title}
 
 ${baseContext({ ...input, imagePanelName: copy.imagePanelName })}
 
 ## 重要风格
 - ${copy.styleRules.join("\n- ")}
-- 正文控制在 300-600 中文字；最多 6 个短段落。
+${weddingRules.length ? `- ${weddingRules.join("\n- ")}\n` : ""}- 正文控制在 300-600 中文字；最多 6 个短段落。
 - ${imageCountLine}；每张图必须对应正文里的一个句子。
 - 语言自然、轻、像认真负责的账号运营者在帮用户做决策，不要像硬广。
 - 如果图片不足，明确写“需要补拍/需基于真实素材图生图”，不要编造不存在的图片。

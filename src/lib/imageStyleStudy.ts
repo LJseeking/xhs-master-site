@@ -1,5 +1,5 @@
 import type { Account, AccountImageStyleStudy } from "@prisma/client";
-import { accountVisualMode, buildCompactImageStyleBrief, buildImageStyleStudy, type AccountVisualMode } from "@/lib/imagePrompts";
+import { accountVisualMode, buildCompactImageStyleBrief, buildImageStyleStudy, isWeddingAccount, type AccountVisualMode } from "@/lib/imagePrompts";
 
 function q(value: string) {
   return JSON.stringify(value);
@@ -61,8 +61,27 @@ const imageStudyCopy: Record<AccountVisualMode, {
   }
 };
 
+const weddingImageStudyCopy = {
+  keywords: ["婚礼", "婚庆", "备婚", "婚礼策划", "婚礼布置", "婚礼蛋糕", "花艺", "仪式区", "迎宾区", "甜品台", "小红书"],
+  goal: "在小红书 App 中搜索同类型婚礼公司、婚礼策划、婚礼布置和备婚灵感爆款图文，专门研究“婚礼图片里的细节如何被拆成高收藏笔记”。重点看婚礼蛋糕、花艺、仪式区、迎宾区、桌花、席位卡、甜品台、灯光布幔等细节如何命名、如何写标题、如何引导新人咨询。",
+  observations: [
+    "封面底图：蛋糕、花艺、仪式区、迎宾区、桌花、甜品台、场布全景哪类更容易获得点击。",
+    "封面标题：细节名、风格词、备婚情绪、收藏理由如何表达，例如“这个蛋糕真的太会抬高级感”。",
+    "图集结构：是否能压缩为封面细节、场景关系、细节拆解、风格/预算信息卡、备婚 FAQ。",
+    "图片识别方式：爆款文章如何从一张现场图里抓住蛋糕、花艺、纸品、灯光、材质、色系、动线等细节。",
+    "正文风格：是否用第一人称/备婚口吻/审美点评/避坑提醒/清单式拆解，如何避免硬广。",
+    "收藏点：适合什么风格、什么场地、什么预算段、什么季节、怎么和策划师沟通。",
+    "不适合借鉴的套路：盗图感、堆砌高级词、无授权新人肖像、虚构价格档期、照搬爆款标题。"
+  ],
+  riskLine: "7. 风险提醒：哪些新人/宾客肖像、真实案例、价格档期、场地信息和 AI 图不能伪装成已授权真实婚礼案例"
+};
+
+function copyForAccount(account: Account) {
+  return isWeddingAccount(account) ? weddingImageStudyCopy : imageStudyCopy[accountVisualMode(account.accountType)];
+}
+
 export function buildImageStyleKeywords(account: Account) {
-  const copy = imageStudyCopy[accountVisualMode(account.accountType)];
+  const copy = copyForAccount(account);
   const base = [
     account.city,
     account.contentDirections,
@@ -83,7 +102,7 @@ export function buildImageStyleKeywords(account: Account) {
 }
 
 export function buildImageStyleResearchPrompt(account: Account) {
-  const copy = imageStudyCopy[accountVisualMode(account.accountType)];
+  const copy = copyForAccount(account);
   return `# 给 xiaohongshu_auto_op skill 的图片风格研究 Prompt
 
 ## 当前执行模式

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { accountVisualMode, buildCompactImageStyleBrief, buildImagePrompt, buildImageStyleStudy } from "@/lib/imagePrompts";
+import { accountVisualMode, buildCompactImageStyleBrief, buildImagePrompt, buildImageStyleStudy, isWeddingAccount } from "@/lib/imagePrompts";
 import { styleBriefFromStudy } from "@/lib/imageStyleStudy";
 import { slugifyAccountName } from "@/lib/fsPaths";
 
@@ -10,7 +10,17 @@ function q(value: string) {
   return JSON.stringify(value);
 }
 
-function commandCopy(accountType: string) {
+function commandCopy(account: { accountType: string; name: string; personaBase: string; contentDirections: string; materialCondition: string; businessGoals: string; targetUsers: string }) {
+  if (isWeddingAccount(account)) {
+    return {
+      source: "填写婚礼图片目录",
+      image2: "让龙虾直接读取婚礼图片文件夹，先识别婚礼蛋糕、花艺、仪式区、迎宾区、桌花、席位卡、灯光布幔等细节，再根据逐张 Prompt 生成细节拆解图和信息卡。",
+      draftCategory: "调用已有婚礼图片做细节拆解",
+      draft: "读取本地婚礼图片目录，先判断每张图片可写成什么小红书选题，再围绕一个高收藏细节规划图集和正文。",
+      safety: "命令只作建议；确保婚礼案例、新人/宾客肖像、场地、价格、档期和套餐信息授权清楚且人工核验。"
+    };
+  }
+  const accountType = account.accountType;
   const mode = accountVisualMode(accountType);
   const copies = {
     culture_tourism: {
@@ -112,7 +122,7 @@ export async function POST(request: Request, context: { params: { id: string } }
 
   const base = "uv run xiaohongshu_auto_op";
   const accountFlag = `--account ${q(noteTask.account.accountParam)}`;
-  const copy = commandCopy(noteTask.account.accountType);
+  const copy = commandCopy(noteTask.account);
   const imageSource = openclawAssetsDir || copy.source;
   const commands = [
     {

@@ -1,6 +1,6 @@
 import type { Account, AccountStrategy, Asset, WeeklyPlan } from "@prisma/client";
 import { addDays, format, startOfWeek } from "date-fns";
-import { accountVisualMode, type AccountVisualMode } from "@/lib/imagePrompts";
+import { accountVisualMode, isWeddingAccount, type AccountVisualMode } from "@/lib/imagePrompts";
 
 type GenerateWeeklyPlanInput = {
   theme: string;
@@ -154,6 +154,22 @@ const weeklyModeConfigs: Record<AccountVisualMode, WeeklyModeConfig> = {
   }
 };
 
+const weddingWeeklyConfig: WeeklyModeConfig = {
+  contentTypes: ["婚礼细节拆解", "真实案例风格", "婚礼蛋糕", "花艺布置", "仪式区/迎宾区", "备婚问答", "短视频脚本"],
+  fallbackColumns: ["图片细节拆解", "爆款风格仿写", "备婚收藏", "案例转化"],
+  fallbackPainPoint: "不知道婚礼图片里的细节值不值得参考、适合什么预算/场地/风格、能否真实落地",
+  fallbackSubject: "婚礼图片细节",
+  fallbackTargetUser: "正在备婚、收集婚礼灵感、比较婚礼策划公司的新人",
+  defaultGoal: "提升收藏、评论咨询和婚礼策划预约转化",
+  subjectLabel: "婚礼细节",
+  coreView: (subject) => `围绕「${subject}」先判断真实婚礼图片里的可写细节，例如婚礼蛋糕、甜品台、花艺、仪式区、迎宾区、桌花、席位卡、灯光或纸品；再选一个最有小红书收藏价值的细节，参考同类型爆款文章的标题节奏和情绪表达，写成备婚用户能保存、能咨询的笔记。`,
+  bodyStructure: "开头点出图片里的高记忆点细节 -> 拆解色系/材质/花材/空间层次/适合风格 -> 说明适合什么新人/场地/季节 -> 给备婚落地提醒和待确认信息 -> 评论区收集婚期、城市、预算和喜欢风格",
+  requiredImages: "默认 5 张：封面真实婚礼细节图 + 同场景远景/关系图 + 细节近景拆解图 + 风格/预算/适合人群信息卡 + 备婚 FAQ/咨询引导卡。必须基于客户真实婚礼图片先做画面判断，不得伪造新人、宾客、婚礼案例、价格、档期、场地或授权。",
+  coverCopyDirection: (subject) => `突出「${subject}」里的一个细节名和备婚收藏理由，用 8-14 字短句表达“为什么这个细节值得抄作业”。`,
+  commentHook: (targetUser) => `${targetUser}可以在评论区留下城市、婚期、预算、场地类型和喜欢的风格，我会按图片细节继续拆下一篇。`,
+  expectedGoal: "收藏率、评论咨询、私信问价、预约沟通四项至少命中一项。"
+};
+
 export function buildNoteTasks(
   account: Account,
   strategy: AccountStrategy | null,
@@ -162,7 +178,7 @@ export function buildNoteTasks(
   plan: Pick<WeeklyPlan, "id">
 ) {
   const mode = accountVisualMode(account.accountType);
-  const config = weeklyModeConfigs[mode];
+  const config = mode === "service" && isWeddingAccount(account) ? weddingWeeklyConfig : weeklyModeConfigs[mode];
   const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
   const parsedStrategy = strategy ? safeJson(strategy.strategyJson) : {};
   const columns = Array.isArray(parsedStrategy.columns) ? parsedStrategy.columns : config.fallbackColumns;
