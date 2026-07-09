@@ -2120,6 +2120,25 @@ function isWeddingUiAccount(account?: Account) {
   );
 }
 
+const weddingPlanningGoalPresets = [
+  {
+    label: "自动读图找选题",
+    value: "客户提供约 30 张婚礼现场图。请先逐张识别画面里的蛋糕、花艺、仪式区、迎宾区、桌花、席位卡、灯光布幔、纸品等细节，再结合同行热门笔记风格，自动挑出最适合小红书的一周或两周选题。"
+  },
+  {
+    label: "突出婚礼细节",
+    value: "重点挖掘婚礼蛋糕、花艺、仪式区、迎宾区、桌花、席位卡、菜单卡、灯光布幔等细节的高级感和可收藏价值，每篇笔记只聚焦一个细节。"
+  },
+  {
+    label: "提升备婚咨询",
+    value: "选题要服务备婚用户的咨询转化。请优先输出容易引发评论的问题，例如预算、风格、场地适配、档期、花材、仪式区落地效果和如何与策划师沟通。"
+  },
+  {
+    label: "参考爆款风格",
+    value: "请重点研究小红书婚礼公司、婚礼策划、婚礼布置、备婚灵感类爆款笔记，学习标题节奏、封面文字、图集顺序、情绪表达和收藏理由，但不得照搬原文。"
+  }
+];
+
 function ImagesPanel(props: {
   selected?: Account;
   plan?: WeeklyPlan;
@@ -2164,10 +2183,12 @@ function ImagesPanel(props: {
   const copyText = assetUiCopy(selected?.accountType);
   const isWedding = isWeddingUiAccount(selected);
   const commandList = [...(weddingImagePlanResult?.commands || []), ...(result?.commands || [])];
+  const [weddingPlanningGoal, setWeddingPlanningGoal] = useState(weddingPlanningGoalPresets[0].value);
 
   return (
     <div className="grid gap-5 xl:grid-cols-[0.42fr_0.58fr]">
       <div className="space-y-5">
+        {!isWedding && (
         <details className="panel">
           <summary className="cursor-pointer text-sm font-medium">
             参考图片风格（可选，高级）
@@ -2224,6 +2245,7 @@ function ImagesPanel(props: {
             </button>
           </form>
         </details>
+        )}
 
         {isWedding && (
           <form
@@ -2241,10 +2263,24 @@ function ImagesPanel(props: {
           >
             <div className="mb-4">
               <div className="mb-2 inline-flex rounded bg-teal/10 px-3 py-1 text-xs font-semibold text-teal">婚礼账号优先流程</div>
-              <h2 className="section-title">批量图片选题规划</h2>
+              <h2 className="section-title">用婚礼现场图自动生成选题规划</h2>
               <p className="mt-1 text-sm text-ink/60">
-                客户一次提供 30 张左右婚礼现场图时，先让龙虾读图识别细节，同时研究同行热门笔记，再输出一周或两周选题规划。
+                运营者只需要准备图片文件夹，系统会生成给龙虾的 Prompt：先读图找细节，再研究同行爆款风格，最后输出一周或两周笔记规划。
               </p>
+            </div>
+
+            <div className="mb-4 grid gap-3 md:grid-cols-3">
+              {[
+                ["1", "放入婚礼图片", "建议 20-40 张，文件名尽量写清细节。"],
+                ["2", "生成龙虾 Prompt", "让龙虾读图并研究小红书爆款。"],
+                ["3", "得到周计划", "输出标题、配图顺序、正文方向和风险核验。"]
+              ].map(([step, title, desc]) => (
+                <div key={step} className="rounded border border-teal/15 bg-teal/5 p-3">
+                  <div className="mb-2 inline-flex h-6 w-6 items-center justify-center rounded bg-teal text-xs font-semibold text-white">{step}</div>
+                  <div className="text-sm font-semibold">{title}</div>
+                  <div className="mt-1 text-xs leading-5 text-ink/60">{desc}</div>
+                </div>
+              ))}
             </div>
 
             <div className="grid gap-3 md:grid-cols-[160px_1fr]">
@@ -2255,26 +2291,52 @@ function ImagesPanel(props: {
                   <option value="2">两周规划</option>
                 </select>
               </label>
-              <Input name="openclawAssetsDir" label="婚礼图片文件夹" defaultValue={selected?.assetsPath || ""} placeholder="/Users/.../婚礼现场图" />
+              <Input
+                name="openclawAssetsDir"
+                label={`婚礼图片文件夹${selected?.assets?.length ? `（已登记 ${selected.assets.length} 张素材）` : ""}`}
+                defaultValue={selected?.assetsPath || ""}
+                placeholder="/Users/.../婚礼现场图"
+                help="可以填客户图片所在文件夹；不填则默认使用当前账号素材库。"
+              />
             </div>
 
             <div className="mt-3 grid gap-3">
+              <div>
+                <div className="mb-2 text-sm font-medium text-ink/70">本次希望龙虾重点完成什么？</div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {weddingPlanningGoalPresets.map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => setWeddingPlanningGoal(preset.value)}
+                      className={clsx(
+                        "rounded border px-3 py-2 text-left text-sm transition",
+                        weddingPlanningGoal === preset.value ? "border-teal bg-teal/10 text-teal" : "border-ink/10 bg-white text-ink/70 hover:border-teal/40"
+                      )}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <Textarea
                 name="planningGoal"
                 label="本次额外诉求"
-                placeholder="例如：重点挖掘婚礼蛋糕、法式花艺和仪式区细节；希望提升备婚咨询。留空则按图片自动判断。"
-                help="客户没有特殊要求也可以留空，系统会按图片里的可写细节自动规划。"
+                value={weddingPlanningGoal}
+                onChange={setWeddingPlanningGoal}
+                placeholder="例如：重点挖掘婚礼蛋糕、法式花艺和仪式区细节；希望提升备婚咨询。"
+                help="可以直接用上面的预设，也可以改成客户自己的诉求。"
               />
               <Textarea
                 name="openclawImagePaths"
-                label="指定图片文件名或路径（可选）"
+                label="只指定部分图片（可选）"
                 placeholder={"婚礼蛋糕.jpg\n香槟色花艺.jpg\n仪式区拱门.jpg\n迎宾牌.jpg"}
-                help="默认读取上面的文件夹。图片名越接近真实细节，龙虾越容易判断选题。"
+                help="通常不用填，龙虾会读取整个文件夹。只有想优先分析某几张图时再填写。"
               />
             </div>
 
             <button type="submit" disabled={loading || !selected} className="primary-button mt-4">
-              <Sparkles size={17} /> 生成批量规划 Prompt
+              <Sparkles size={17} /> 生成给龙虾的一键规划 Prompt
             </button>
 
             {weddingImagePlanResult?.planningPrompt.path && (
@@ -2296,9 +2358,11 @@ function ImagesPanel(props: {
           }}
         >
           <div className="mb-4">
-            <h2 className="section-title">生成本篇图片方案</h2>
+            <h2 className="section-title">{isWedding ? "规划后再细化单篇图片方案（可选）" : "生成本篇图片方案"}</h2>
             <p className="mt-1 text-sm text-ink/60">
-              选择一篇本周内容，系统会根据已上传素材生成每张图怎么选、怎么改、怎么排；素材不足时会先列补拍和补资料清单。
+              {isWedding
+                ? "批量规划完成后，如果你已经把某篇选题放进“本周内容”，可以在这里继续生成这篇笔记的逐张图片方案。"
+                : "选择一篇本周内容，系统会根据已上传素材生成每张图怎么选、怎么改、怎么排；素材不足时会先列补拍和补资料清单。"}
             </p>
           </div>
 
@@ -2314,7 +2378,7 @@ function ImagesPanel(props: {
               </select>
             </label>
           ) : (
-            <EmptyState text="先到“本周内容”生成计划，再为某篇笔记生成图片方案。" />
+            <EmptyState text={isWedding ? "婚礼账号可以先用上方“批量图片选题规划”生成一周或两周方案；有了具体选题后，再回来细化单篇图片方案。" : "先到“本周内容”生成计划，再为某篇笔记生成图片方案。"} />
           )}
 
           {note && (
@@ -2342,7 +2406,7 @@ function ImagesPanel(props: {
           </details>
 
           <button type="submit" disabled={loading || !note} className="primary-button mt-4">
-            <ImageIcon size={17} /> 生成图片方案
+            <ImageIcon size={17} /> {isWedding ? "细化这篇图片方案" : "生成图片方案"}
           </button>
         </form>
 
@@ -2385,6 +2449,20 @@ function ImagesPanel(props: {
               </div>
             </div>
             {weddingImagePlanResult?.planningPrompt.path && <div className="mb-2 rounded bg-teal/10 px-3 py-2 text-xs text-teal">{weddingImagePlanResult.planningPrompt.path}</div>}
+            {weddingImagePlanResult ? (
+              <div className="mb-3 grid gap-2 sm:grid-cols-3">
+                {[
+                  ["复制 Prompt", "给龙虾读取图片和研究爆款。"],
+                  ["执行命令", "用左侧命令生成规划草稿。"],
+                  ["人工核验", "检查肖像授权、价格、档期和场地。"]
+                ].map(([title, desc]) => (
+                  <div key={title} className="rounded border border-teal/15 bg-teal/5 p-3">
+                    <div className="text-sm font-semibold text-teal">{title}</div>
+                    <div className="mt-1 text-xs leading-5 text-ink/60">{desc}</div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <textarea
               className="code-textarea min-h-[360px]"
               value={
