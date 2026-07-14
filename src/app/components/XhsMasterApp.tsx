@@ -1556,7 +1556,7 @@ function Dashboard({
     ["配置文件", selected?.profile ? `v${selected.profile.version}` : "自动生成", "agents"]
   ];
   return (
-    <div className="space-y-5">
+    <div className="mx-auto max-w-[1480px] space-y-5">
       <div className="panel flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="section-title">账号运营工作台</h2>
@@ -3338,8 +3338,8 @@ function ReportsPanel(props: {
         </div>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
-        <form className="panel" onSubmit={generatePostReview}>
+      <div className="grid gap-5 xl:grid-cols-[minmax(380px,480px)_minmax(0,1fr)]">
+        <form className="panel min-w-0" onSubmit={generatePostReview}>
           <div className="mb-4">
             <h2 className="section-title">单篇帖子复盘</h2>
             <p className="mt-1 text-sm text-ink/60">重点不是填完整表格，而是把这篇帖子的真实证据留下来。</p>
@@ -3391,8 +3391,8 @@ function ReportsPanel(props: {
           </button>
         </form>
 
-        <div className="space-y-5">
-          <div className="panel">
+        <div className="min-w-0 space-y-5">
+          <div className="panel min-w-0">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <h2 className="section-title">复盘 Prompt</h2>
@@ -3407,7 +3407,9 @@ function ReportsPanel(props: {
             <input type="hidden" name="source" value="post_review" readOnly />
             <div className="mb-3">
               <h2 className="section-title">保存候选规则</h2>
-              <p className="mt-1 text-sm text-ink/60">把复盘输出里的 JSON 规则数组粘贴进来，作为后续生成内容的经验库。</p>
+              <p className="mt-1 text-sm text-ink/60">
+                可选步骤：把复盘输出里的 JSON 规则数组粘贴进来。保存后，后续生成笔记草稿和图片方案时会自动参考这些经验。
+              </p>
             </div>
             <Textarea name="rulesJson" label="候选规则 JSON" placeholder={'[{"module":"title","rule":"...","confidence":0.5}]'} />
             <button type="submit" className="secondary-button mt-4">
@@ -3420,7 +3422,7 @@ function ReportsPanel(props: {
       <div className="panel">
         <div className="mb-3">
           <h2 className="section-title">最近经验</h2>
-          <p className="mt-1 text-sm text-ink/60">先展示候选规则，后续可以继续做审核、启用和注入生成链路。</p>
+          <p className="mt-1 text-sm text-ink/60">这些规则会作为内部经验进入后续生成 Prompt，不会直接出现在发布文案里。</p>
         </div>
         {selected.expertRules?.length ? (
           <div className="grid gap-2 md:grid-cols-2">
@@ -3660,7 +3662,11 @@ function IconButton({ title, onClick, icon }: { title: string; onClick: () => vo
 }
 
 function MarkdownBox({ value }: { value: string }) {
-  return <pre className="max-h-[72vh] overflow-auto whitespace-pre-wrap rounded border border-ink/10 bg-white p-4 text-sm leading-6">{value}</pre>;
+  return (
+    <pre className="max-h-[58vh] w-full max-w-full min-w-0 overflow-auto whitespace-pre-wrap break-words rounded border border-ink/10 bg-white p-4 text-sm leading-6 [overflow-wrap:anywhere]">
+      {value}
+    </pre>
+  );
 }
 
 function EmptyState({ text = "还没有数据，请先创建账号。" }: { text?: string }) {
