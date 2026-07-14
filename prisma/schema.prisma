@@ -36,6 +36,9 @@ model Account {
   commands          CommandSuggestion[]
   drafts            DraftResult[]
   weeklyReports     WeeklyReport[]
+  postReviews       PostReview[]
+  expertRules       ExpertRule[]
+  industryKnowledgeResearches IndustryKnowledgeResearch[]
   referenceResearches AccountReferenceResearch[]
   imageStyleStudies AccountImageStyleStudy[]
   interactionPlans  AccountInteractionPlan[]
@@ -219,6 +222,7 @@ model NoteTask {
   commands       CommandSuggestion[]
   draftResult    DraftResult?
   interactionPlans AccountInteractionPlan[]
+  postReviews    PostReview[]
 
   @@map("note_tasks")
 }
@@ -288,6 +292,60 @@ model WeeklyReport {
   weeklyPlan   WeeklyPlan? @relation(fields: [weeklyPlanId], references: [id], onDelete: SetNull)
 
   @@map("weekly_reports")
+}
+
+model PostReview {
+  id          Int       @id @default(autoincrement())
+  accountId   Int
+  noteTaskId  Int?
+  inputJson   String
+  prompt      String
+  status      String    @default("待复盘")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  account     Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  noteTask    NoteTask? @relation(fields: [noteTaskId], references: [id], onDelete: SetNull)
+
+  @@map("post_reviews")
+}
+
+model ExpertRule {
+  id                Int      @id @default(autoincrement())
+  accountId         Int?
+  accountType       String   @default("")
+  module            String
+  rule              String
+  positiveExample   String   @default("")
+  negativeExample   String   @default("")
+  reason            String   @default("")
+  source            String   @default("")
+  confidence        Float    @default(0.5)
+  applicableWhen    String   @default("")
+  notApplicableWhen String   @default("")
+  nextTest          String   @default("")
+  status            String   @default("候选")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  account           Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@map("expert_rules")
+}
+
+model IndustryKnowledgeResearch {
+  id              Int      @id @default(autoincrement())
+  accountId       Int
+  topic           String
+  searchScope     String   @default("全国 / 全网")
+  commandJson     String
+  researchPrompt  String
+  rawResults      String   @default("")
+  summaryMarkdown String   @default("")
+  status          String   @default("待搜索")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("industry_knowledge_researches")
 }
 
 model Setting {

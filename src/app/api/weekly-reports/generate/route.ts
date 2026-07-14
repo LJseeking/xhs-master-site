@@ -9,9 +9,16 @@ export async function POST(request: Request) {
   if (!account) return NextResponse.json({ error: "账号不存在" }, { status: 404 });
   const prompt = buildWeeklyReportPrompt({
     accountName: account.name,
+    accountType: account.accountType,
+    reviewMode: body.reviewMode || "",
     weekLabel: body.weekLabel || "本周",
     rows: body.rows || [],
-    subjective: body.subjective || ""
+    subjective: body.subjective || "",
+    expertFeedback: body.expertFeedback || "",
+    editComparison: body.editComparison || "",
+    effectivePatterns: body.effectivePatterns || "",
+    failedPatterns: body.failedPatterns || "",
+    distillGoal: body.distillGoal || ""
   });
   const report = await prisma.weeklyReport.create({
     data: {

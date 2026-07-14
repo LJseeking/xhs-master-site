@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { buildTaskPrompt } from "@/lib/prompt";
 import { buildCommandSuggestions } from "@/lib/commands";
 import { slugifyAccountName } from "@/lib/fsPaths";
+import { formatExpertRulesForPrompt } from "@/lib/expertLearning";
 
 export async function POST(_request: Request, context: { params: { id: string } }) {
   const id = Number(context.params.id);
@@ -13,7 +14,8 @@ export async function POST(_request: Request, context: { params: { id: string } 
     include: {
       account: {
         include: {
-          strategy: true
+          strategy: true,
+          expertRules: { orderBy: { createdAt: "desc" }, take: 12 }
         }
       },
       weeklyPlan: true
@@ -28,7 +30,8 @@ export async function POST(_request: Request, context: { params: { id: string } 
     account: noteTask.account,
     strategy: noteTask.account.strategy,
     weeklyPlan: noteTask.weeklyPlan,
-    noteTask
+    noteTask,
+    expertRules: formatExpertRulesForPrompt(noteTask.account.expertRules)
   });
   await fs.writeFile(path.join(process.cwd(), promptFile), content, "utf8");
 

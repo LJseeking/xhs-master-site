@@ -3,7 +3,7 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { slugifyAccountName } from "@/lib/fsPaths";
-import { assertWeddingAccount, buildWeddingImagePlanCommands, buildWeddingImagePlanPrompt } from "@/lib/weddingImagePlanning";
+import { buildBatchImagePostsCommands, buildBatchImagePostsPrompt } from "@/lib/batchImagePosts";
 
 export async function POST(request: Request, context: { params: { id: string } }) {
   const accountId = Number(context.params.id);
@@ -16,24 +16,18 @@ export async function POST(request: Request, context: { params: { id: string } }
   const account = await prisma.account.findUnique({
     where: { id: accountId },
     include: {
-      assets: { orderBy: { createdAt: "desc" }, take: 80 },
+      assets: { orderBy: { createdAt: "desc" }, take: 100 },
       imageStyleStudies: { orderBy: { createdAt: "desc" }, take: 1 },
       referenceResearches: { orderBy: { createdAt: "desc" }, take: 1 }
     }
   });
   if (!account) return NextResponse.json({ error: "账号不存在" }, { status: 404 });
 
-  try {
-    assertWeddingAccount(account);
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "当前账号不适合婚礼图片规划。" }, { status: 400 });
-  }
-
   const promptDir = path.join(process.cwd(), "prompts", slugifyAccountName(account.name));
   await fs.mkdir(promptDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const promptFile = path.join("prompts", slugifyAccountName(account.name), `wedding-image-plan-${weeks}w-${stamp}.md`);
-  const content = buildWeddingImagePlanPrompt(account, {
+  const promptFile = path.join("prompts", slugifyAccountName(account.name), `batch-image-posts-${weeks}w-${stamp}.md`);
+  const content = buildBatchImagePostsPrompt(account, {
     weeks,
     openclawAssetsDir,
     openclawImagePaths,
@@ -41,7 +35,7 @@ export async function POST(request: Request, context: { params: { id: string } }
   });
   await fs.writeFile(path.join(process.cwd(), promptFile), content, "utf8");
 
-  const commands = buildWeddingImagePlanCommands(account, {
+  const commands = buildBatchImagePostsCommands(account, {
     weeks,
     openclawAssetsDir,
     openclawImagePaths,
@@ -53,7 +47,7 @@ export async function POST(request: Request, context: { params: { id: string } }
     data: {
       accountId,
       level: "info",
-      message: "婚礼批量帖子生成 Prompt 已生成",
+      message: "批量图片帖子生成 Prompt 已生成",
       meta: JSON.stringify({
         weeks,
         promptFile,
@@ -66,7 +60,7 @@ export async function POST(request: Request, context: { params: { id: string } }
 
   return NextResponse.json({
     planningPrompt: {
-      title: `${account.name} 婚礼批量帖子生成`,
+      title: `${account.name} 批量图片帖子生成`,
       content,
       path: promptFile
     },

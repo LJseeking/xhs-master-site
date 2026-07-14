@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { accountVisualMode, buildCompactImageStyleBrief, buildImagePrompt, buildImageStyleStudy, isWeddingAccount } from "@/lib/imagePrompts";
 import { styleBriefFromStudy } from "@/lib/imageStyleStudy";
 import { slugifyAccountName } from "@/lib/fsPaths";
+import { formatExpertRulesForPrompt } from "@/lib/expertLearning";
 
 function q(value: string) {
   return JSON.stringify(value);
@@ -88,6 +89,12 @@ export async function POST(request: Request, context: { params: { id: string } }
   const body = await request.json().catch(() => ({}));
   const openclawAssetsDir = String(body.openclawAssetsDir || "");
   const openclawImagePaths = String(body.openclawImagePaths || "");
+  const imageSourceMode = ["ai_generate", "manual_images", "folder_select"].includes(String(body.imageSourceMode))
+    ? String(body.imageSourceMode)
+    : "folder_select";
+  const noteContent = String(body.noteContent || "");
+  const singleGoal = String(body.singleGoal || "");
+  const imageCount = String(body.imageCount || "");
 
   const noteTask = await prisma.noteTask.findUnique({
     where: { id },
@@ -95,7 +102,8 @@ export async function POST(request: Request, context: { params: { id: string } }
       account: {
         include: {
           imageStyleStudies: { orderBy: { createdAt: "desc" }, take: 1 },
-          referenceResearches: { orderBy: { createdAt: "desc" }, take: 1 }
+          referenceResearches: { orderBy: { createdAt: "desc" }, take: 1 },
+          expertRules: { orderBy: { createdAt: "desc" }, take: 12 }
         }
       }
     }
@@ -116,7 +124,12 @@ export async function POST(request: Request, context: { params: { id: string } }
     noteTask,
     styleBrief: styleBrief.length ? styleBrief : fallbackBrief,
     openclawAssetsDir,
-    openclawImagePaths
+    openclawImagePaths,
+    imageSourceMode,
+    noteContent,
+    singleGoal,
+    imageCount,
+    expertRules: formatExpertRulesForPrompt(noteTask.account.expertRules)
   });
   await fs.writeFile(path.join(process.cwd(), imagePromptFile), content, "utf8");
 
@@ -124,20 +137,33 @@ export async function POST(request: Request, context: { params: { id: string } }
   const accountFlag = `--account ${q(noteTask.account.accountParam)}`;
   const copy = commandCopy(noteTask.account);
   const imageSource = openclawAssetsDir || copy.source;
-  const commands = [
-    {
-      category: "调用 image2 生成图片",
-      command: `${base} xhs-creative image2 --prompt-file ${q(imagePromptFile)} --assets-dir ${q(imageSource)} --output-dir ${q(noteTask.account.assetsPath)} ${accountFlag}`,
-      description: copy.image2,
-      safetyNote: "只生成图片/参数建议，不真实发布。"
-    },
-    {
-      category: copy.draftCategory,
-      command: `${base} xhs-content-ops draft-note --prompt-file ${q(imagePromptFile)} --assets-dir ${q(imageSource)} ${accountFlag} --safe-mode`,
-      description: copy.draft,
-      safetyNote: copy.safety
-    }
-  ];
+  const commands =
+    imageSourceMode === "ai_generate"
+      ? [
+          {
+            category: "按笔记内容生成 AI 辅助图方案",
+            command: `${base} xhs-content-ops draft-note --prompt-file ${q(imagePromptFile)} ${accountFlag} --safe-mode`,
+            description: "根据这篇笔记内容生成信息卡、结构说明、低拟真辅助画面和必要的图片提示词；不调用真实案例素材。",
+            safetyNote: "AI 辅助图不得伪装成真实案例、真实现场或真实客户反馈；对外图片、标题、正文和图注不标注来源说明。"
+          }
+        ]
+      : imageSourceMode === "manual_images"
+        ? [
+            {
+              category: "用指定图片生成单篇方案",
+              command: `${base} xhs-creative image2 --prompt-file ${q(imagePromptFile)} --assets-dir ${q(imageSource)} --output-dir ${q(noteTask.account.assetsPath)} ${accountFlag}`,
+              description: "按用户指定的图片文件生成封面、图集顺序、图上文字和必要的 image2 轻处理提示。",
+              safetyNote: copy.safety
+            }
+          ]
+        : [
+            {
+              category: "让龙虾从文件夹自动选图",
+              command: `${base} xhs-content-ops draft-note --prompt-file ${q(imagePromptFile)} --assets-dir ${q(imageSource)} ${accountFlag} --safe-mode`,
+              description: "根据这篇笔记内容读取整个素材文件夹，自动挑出最匹配主题的图片，并生成图集顺序、正文和风险核验。",
+              safetyNote: copy.safety
+            }
+          ];
 
   return NextResponse.json({
     imagePrompt: {

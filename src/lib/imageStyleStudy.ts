@@ -83,7 +83,10 @@ function copyForAccount(account: Account) {
 export function buildImageStyleKeywords(account: Account) {
   const copy = copyForAccount(account);
   const base = [
-    account.city,
+    "全国",
+    "爆款",
+    "高收藏",
+    "高互动",
     account.contentDirections,
     account.targetUsers,
     account.painPoints,
@@ -97,7 +100,7 @@ export function buildImageStyleKeywords(account: Account) {
     .split(/\s+/)
     .filter(Boolean);
 
-  const unique = Array.from(new Set(base)).slice(0, 14);
+  const unique = Array.from(new Set(base)).slice(0, 18);
   return unique.join(" / ");
 }
 
@@ -114,6 +117,8 @@ export function buildImageStyleResearchPrompt(account: Account) {
 ## 研究目标
 ${copy.goal}
 
+重要原则：图片风格研究必须优先搜索全国范围内同类型高收藏/高互动图文，不要局限在账号所在城市。本地内容只作为落地差异、价格语境、用户咨询习惯的补充对照；封面、图集结构、标题节奏、信息卡样式和收藏点应优先从全国成熟爆款样本中提炼。
+
 ## 我方账号
 - 账号名称：${account.name}
 - 账号类型：${account.accountType}
@@ -123,7 +128,8 @@ ${copy.goal}
 - 用户痛点：${account.painPoints || "未填写"}
 
 ## 搜索关键词
-${buildImageStyleKeywords(account)}
+- 全国同类型图片爆款：${buildImageStyleKeywords(account)}
+- 本地对照（仅补充）：${[account.city, ...copy.keywords.slice(0, 4)].filter(Boolean).join(" ") || "未设置城市，可跳过"}
 
 ## 请重点观察
 ${copy.observations.map((item, index) => `${index + 1}. ${item}`).join("\n")}
@@ -148,11 +154,18 @@ export function buildImageStyleCommands(account: Account) {
   const base = "uv run xiaohongshu_auto_op";
   const accountFlag = `--account ${q(account.accountParam)}`;
   const keyword = buildImageStyleKeywords(account);
+  const localKeyword = [account.city, ...copyForAccount(account).keywords.slice(0, 4)].filter(Boolean).join(" ");
   return [
     {
-      category: "搜索同类型图片风格",
-      command: `${base} xhs-explore search --keyword ${q(keyword)} ${accountFlag} --limit 30 --include-notes`,
-      description: "只读搜索同类型图文笔记，重点观察封面和图集结构。",
+      category: "全国同类型图片爆款",
+      command: `${base} xhs-explore search --keyword ${q(keyword)} ${accountFlag} --limit 40 --include-notes --include-comments`,
+      description: "优先搜索全国同类型高收藏/高互动图文，重点观察封面、图集结构和收藏点。",
+      safetyNote: "只读搜索命令，不发布、不互动。"
+    },
+    {
+      category: "本地图片风格对照（可选）",
+      command: `${base} xhs-explore search --keyword ${q(localKeyword || keyword)} ${accountFlag} --limit 15 --include-notes`,
+      description: "仅用于对照本地落地差异，不作为主要风格样本。",
       safetyNote: "只读搜索命令，不发布、不互动。"
     },
     {

@@ -35,6 +35,9 @@ export async function GET() {
         referenceResearches: { orderBy: { createdAt: "desc" }, take: 5 },
         imageStyleStudies: { orderBy: { createdAt: "desc" }, take: 5 },
         interactionPlans: { orderBy: { createdAt: "desc" }, take: 8 },
+        postReviews: { orderBy: { createdAt: "desc" }, take: 8 },
+        expertRules: { orderBy: { createdAt: "desc" }, take: 20 },
+        industryKnowledgeResearches: { orderBy: { createdAt: "desc" }, take: 5 },
         assets: { orderBy: { createdAt: "desc" }, take: 50 },
         weeklyPlans: { orderBy: { createdAt: "desc" }, include: { noteTasks: true }, take: 10 }
       }
@@ -108,6 +111,9 @@ export async function POST(request: Request) {
       referenceResearches: { orderBy: { createdAt: "desc" }, take: 5 },
       imageStyleStudies: { orderBy: { createdAt: "desc" }, take: 5 },
       interactionPlans: { orderBy: { createdAt: "desc" }, take: 8 },
+      postReviews: { orderBy: { createdAt: "desc" }, take: 8 },
+      expertRules: { orderBy: { createdAt: "desc" }, take: 20 },
+      industryKnowledgeResearches: { orderBy: { createdAt: "desc" }, take: 5 },
       assets: true,
       weeklyPlans: { include: { noteTasks: true } }
     }

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
+  BookOpen,
   CalendarDays,
   Clipboard,
   Download,
@@ -57,6 +58,9 @@ type Account = {
   referenceResearches?: ReferenceResearch[];
   imageStyleStudies?: ImageStyleStudy[];
   interactionPlans?: InteractionPlan[];
+  postReviews?: PostReview[];
+  expertRules?: ExpertRule[];
+  industryKnowledgeResearches?: IndustryKnowledgeResearch[];
   assets: Asset[];
   weeklyPlans: WeeklyPlan[];
 };
@@ -97,6 +101,38 @@ type InteractionPlan = {
   targetUsersMarkdown: string;
   commentDraftsMarkdown: string;
   status: string;
+};
+
+type PostReview = {
+  id: number;
+  noteTaskId: number | null;
+  inputJson: string;
+  prompt: string;
+  status: string;
+  createdAt: string;
+};
+
+type ExpertRule = {
+  id: number;
+  accountType: string;
+  module: string;
+  rule: string;
+  source: string;
+  confidence: number;
+  status: string;
+  createdAt: string;
+};
+
+type IndustryKnowledgeResearch = {
+  id: number;
+  topic: string;
+  searchScope: string;
+  commandJson: string;
+  researchPrompt: string;
+  rawResults: string;
+  summaryMarkdown: string;
+  status: string;
+  createdAt: string;
 };
 
 type Asset = {
@@ -156,21 +192,33 @@ type ImagePromptResult = {
   commands: Array<{ category: string; command: string; description: string; safetyNote: string }>;
 };
 
-type WeddingImagePlanResult = {
+type BatchImagePostsResult = {
   planningPrompt: { content: string; title: string; path: string };
   commands: Array<{ category: string; command: string; description: string; safetyNote: string }>;
+};
+
+type SingleImageSourceMode = "ai_generate" | "manual_images" | "folder_select";
+
+type SingleImagePromptOptions = {
+  openclawAssetsDir?: string;
+  openclawImagePaths?: string;
+  imageSourceMode?: SingleImageSourceMode;
+  noteContent?: string;
+  singleGoal?: string;
+  imageCount?: string;
 };
 
 const mainTabs = [
   ["dashboard", "工作台", LayoutDashboard],
   ["accounts", "客户账号", ShieldCheck],
-  ["assets", "上传素材", Library],
   ["weekly", "本周内容", CalendarDays],
   ["images", "图片方案", ImageIcon],
   ["prompts", "笔记草稿", Wand2],
-  ["interactions", "发布互动", MessageCircle],
-  ["drafts", "草稿保存", NotebookPen],
-  ["reports", "复盘", Activity]
+  ["assets", "素材库", Library],
+  ["interactions", "发布后互动", MessageCircle],
+  ["drafts", "草稿记录", NotebookPen],
+  ["reports", "专家复盘", Activity],
+  ["learning", "行业学习", BookOpen]
 ] as const;
 
 const advancedTabs = [
@@ -210,6 +258,7 @@ function accountUiMode(accountType?: string) {
   if (accountType === "homestay_hotel_camp") return "stay";
   if (accountType === "museum_exhibition_study") return "museum";
   if (accountType === "regional_product_cultural_creative") return "product";
+  if (accountType === "wedding_planning") return "service";
   if (accountType === "local_life_service") return "service";
   return "culture_tourism";
 }
@@ -542,6 +591,18 @@ function accountTypeDefaults(accountType: string, template?: Template) {
     };
   }
 
+  if (accountType === "wedding_planning") {
+    return {
+      targetUsers: "准备结婚的新人、正在比较婚礼服务的客户、重视审美风格的用户、需要预算透明的用户、本地到店咨询用户、老客转介绍用户",
+      painPoints: "预算不透明、案例是否真实、现场效果是否落地、流程是否省心、婚礼风格是否适合自己、档期和价格是否清楚",
+      contentDirections: "真实婚礼案例、婚礼服务流程、风格细节拆解、预算避坑、场地/门店空间、预约问答、客户顾虑",
+      businessGoals: "增加咨询、提升预约、展示真实婚礼案例、建立信任、促进到店沟通、沉淀私域跟进",
+      monetization: "婚礼服务咨询、套餐预约、到店沟通、定制方案、私域跟进",
+      materialCondition: "真实婚礼案例图、婚礼服务过程图、场地/门店环境图、客户授权图、价格套餐图、短视频素材、资质/证书图",
+      taboos: "不能伪造真实客户案例，不能使用未授权肖像，不能夸大服务效果，不能虚构价格、档期、场地、套餐、资质或顾客评价"
+    };
+  }
+
   if (accountType === "cultural_tourism_destination") {
     return {
       targetUsers: "周末游客、亲子家庭、研学机构、城市微度假用户、外地旅行用户",
@@ -595,6 +656,15 @@ function accountChoiceOptions(accountType: string) {
     };
   }
 
+  if (accountType === "wedding_planning") {
+    return {
+      targetUsers: ["准备结婚的新人", "正在比较婚礼服务的客户", "重视审美风格的用户", "需要预算透明的用户", "本地到店咨询用户", "老客转介绍用户"],
+      businessGoals: ["增加咨询", "提升预约", "展示真实婚礼案例", "建立信任", "促进到店沟通", "沉淀私域跟进"],
+      materialCondition: ["真实婚礼案例图", "婚礼服务过程图", "场地/门店环境图", "客户授权图", "价格套餐图", "短视频素材", "资质/证书图"],
+      taboos: ["不伪造真实婚礼案例", "不使用未授权肖像", "不虚构价格/档期", "不夸大落地效果", "不伪造顾客评价", "不泄露客户隐私"]
+    };
+  }
+
   if (accountType === "cultural_tourism_destination") {
     return {
       targetUsers: ["周末游客", "亲子家庭", "研学机构", "城市微度假用户", "外地旅行用户", "拍照打卡用户"],
@@ -623,8 +693,50 @@ function autoAccountParam(name: string, accountType: string, count = 0) {
     .replace(/^-|-$/g, "")
     .slice(0, 24);
   if (latin) return latin;
-  const prefix = accountType.split("_")[0] || "brand";
+  const normalizedName = name.toLowerCase();
+  const prefix =
+    accountType === "wedding_planning" || /婚礼|婚庆|婚纱|wedding/.test(normalizedName)
+      ? "wedding"
+      : accountType === "local_life_service"
+        ? "service"
+        : accountType.split("_")[0] || "brand";
   return `${prefix}-${String(count + 1).padStart(2, "0")}`;
+}
+
+function isGeneratedAccountParam(value: string) {
+  return /^[a-z][a-z0-9-]*-\d{2}$/.test(value.trim());
+}
+
+function replacePreviousDefault(current: string, previousValue: string, nextValue: string) {
+  const trimmed = current.trim();
+  return !trimmed || trimmed === previousValue ? nextValue : current;
+}
+
+function cleanChoiceCarryover(current: string, previousOptions: string[], nextDefault: string) {
+  const previousOptionSet = new Set(previousOptions);
+  const tokens = splitChoiceText(current).filter((item) => !previousOptionSet.has(item));
+  return tokens.length ? tokens.join("、") : nextDefault;
+}
+
+function switchAccountTypeForm(form: ReturnType<typeof emptyAccountForm>, templates: Template[], nextType: string) {
+  const previousTemplate = templates.find((item) => item.typeKey === form.accountType);
+  const nextTemplate = templates.find((item) => item.typeKey === nextType);
+  const previousDefaults = accountTypeDefaults(form.accountType, previousTemplate);
+  const nextDefaults = accountTypeDefaults(nextType, nextTemplate);
+  const previousChoices = accountChoiceOptions(form.accountType);
+
+  return {
+    ...form,
+    accountType: nextType,
+    accountParam: !form.accountParam.trim() || isGeneratedAccountParam(form.accountParam) ? "" : form.accountParam,
+    targetUsers: cleanChoiceCarryover(form.targetUsers, previousChoices.targetUsers, nextDefaults.targetUsers),
+    businessGoals: cleanChoiceCarryover(form.businessGoals, previousChoices.businessGoals, nextDefaults.businessGoals),
+    materialCondition: cleanChoiceCarryover(form.materialCondition, previousChoices.materialCondition, nextDefaults.materialCondition),
+    taboos: cleanChoiceCarryover(form.taboos, previousChoices.taboos, nextDefaults.taboos),
+    painPoints: replacePreviousDefault(form.painPoints, previousDefaults.painPoints, nextDefaults.painPoints),
+    contentDirections: replacePreviousDefault(form.contentDirections, previousDefaults.contentDirections, nextDefaults.contentDirections),
+    monetization: replacePreviousDefault(form.monetization, previousDefaults.monetization, nextDefaults.monetization)
+  };
 }
 
 function hydrateAccountForm(form: ReturnType<typeof emptyAccountForm>, templates: Template[], count = 0) {
@@ -660,7 +772,7 @@ export function XhsMasterApp() {
   const [toast, setToast] = useState("");
   const [promptResults, setPromptResults] = useState<Record<number, PromptResult>>({});
   const [imagePromptResults, setImagePromptResults] = useState<Record<number, ImagePromptResult>>({});
-  const [weddingImagePlanResults, setWeddingImagePlanResults] = useState<Record<number, WeddingImagePlanResult>>({});
+  const [batchImagePostResults, setBatchImagePostResults] = useState<Record<number, BatchImagePostsResult>>({});
   const [selectedNoteId, setSelectedNoteId] = useState<number | null>(null);
   const [health, setHealth] = useState<any>(null);
   const [manifest, setManifest] = useState<{ content: string; validation: string; path: string } | null>(null);
@@ -682,6 +794,12 @@ export function XhsMasterApp() {
     discoveryPrompt?: string;
     commentPrompt?: string;
     summary?: { targetUsersMarkdown: string; commentDraftsMarkdown: string };
+  }>({});
+  const [postReviewPrompt, setPostReviewPrompt] = useState("");
+  const [industryLearningDraft, setIndustryLearningDraft] = useState<{
+    research?: IndustryKnowledgeResearch;
+    commands?: Array<{ category: string; command: string; description: string; safetyNote: string }>;
+    researchPrompt?: string;
   }>({});
 
   const selected = useMemo(() => accounts.find((account) => account.id === selectedId) ?? accounts[0], [accounts, selectedId]);
@@ -752,6 +870,8 @@ export function XhsMasterApp() {
       setReferenceDraft({});
       setImageStyleDraft({});
       setInteractionDraft({});
+      setPostReviewPrompt("");
+      setIndustryLearningDraft({});
       await refresh();
       setActiveTab(data.nextAccountId ? "dashboard" : "accounts");
       showToast(data.note || "账号已删除。");
@@ -873,7 +993,7 @@ export function XhsMasterApp() {
     setReferenceDraft({ research: data.research, commands: data.commands, researchPrompt: data.researchPrompt });
     await refresh();
     setLoading(false);
-    showToast("爆款参考包已生成。");
+    showToast("爆款研究已生成。");
   }
 
   async function saveReferenceResearch(event: React.FormEvent<HTMLFormElement>) {
@@ -901,7 +1021,7 @@ export function XhsMasterApp() {
     await refresh();
     setProfileContent(data.account?.profile?.content || profileContent);
     setLoading(false);
-    showToast("已基于爆款参考增强策划案和配置文件。");
+    showToast("已基于爆款研究增强策划案和配置文件。");
   }
 
   async function prepareImageStyleStudy() {
@@ -1023,7 +1143,7 @@ export function XhsMasterApp() {
     showToast("正文草稿和执行命令已生成。");
   }
 
-  async function generateImagePrompt(task: NoteTask, options?: { openclawAssetsDir?: string; openclawImagePaths?: string }) {
+  async function generateImagePrompt(task: NoteTask, options?: SingleImagePromptOptions) {
     setLoading(true);
     try {
       const res = await fetch(`/api/note-tasks/${task.id}/image-prompt`, {
@@ -1042,21 +1162,21 @@ export function XhsMasterApp() {
     }
   }
 
-  async function generateWeddingImagePlan(options?: { weeks?: string; openclawAssetsDir?: string; openclawImagePaths?: string; planningGoal?: string }) {
+  async function generateBatchImagePosts(options?: { weeks?: string; openclawAssetsDir?: string; openclawImagePaths?: string; planningGoal?: string }) {
     if (!selected) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/accounts/${selected.id}/wedding-image-plan`, {
+      const res = await fetch(`/api/accounts/${selected.id}/batch-image-posts`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(options || {})
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "生成婚礼批量图片规划失败。");
-      setWeddingImagePlanResults((current) => ({ ...current, [selected.id]: data }));
-      showToast("婚礼批量图片选题规划 Prompt 已生成。");
+      if (!res.ok) throw new Error(data.error || "生成批量图片帖子失败。");
+      setBatchImagePostResults((current) => ({ ...current, [selected.id]: data }));
+      showToast("批量图片帖子任务已生成。");
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "生成婚礼批量图片规划失败。");
+      showToast(error instanceof Error ? error.message : "生成批量图片帖子失败。");
     } finally {
       setLoading(false);
     }
@@ -1078,34 +1198,122 @@ export function XhsMasterApp() {
     showToast("草稿结果已保存。");
   }
 
-  async function generateReport(event: React.FormEvent<HTMLFormElement>) {
+  async function generatePostReview(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selected) return;
     const form = new FormData(event.currentTarget);
-    const rawRows = String(form.get("rows") || "");
-    const rows = rawRows
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
-        const [title, impressions, clicks, likes, saves, comments, messages, conversions] = line.split(",").map((item) => item.trim());
-        return { title, impressions, clicks, likes, saves, comments, messages, conversions };
-      });
     setLoading(true);
-    const res = await fetch("/api/weekly-reports/generate", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        accountId: selected.id,
-        weeklyPlanId: latestPlan?.id,
-        weekLabel: form.get("weekLabel"),
-        subjective: form.get("subjective"),
-        rows
-      })
-    });
-    const report = await res.json();
-    setLoading(false);
-    downloadText(`weekly-report-prompt-${selected.name}.md`, report.prompt);
-    showToast("周报复盘建议已生成并下载。");
+    try {
+      const res = await fetch(`/api/accounts/${selected.id}/post-reviews`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          noteTaskId: form.get("noteTaskId") || selectedNote?.id || null,
+          postTitle: form.get("postTitle"),
+          postUrl: form.get("postUrl"),
+          publishedAt: form.get("publishedAt"),
+          actualContent: form.get("actualContent"),
+          metrics: form.get("metrics"),
+          comments: form.get("comments"),
+          expertFeedback: form.get("expertFeedback"),
+          editComparison: form.get("editComparison"),
+          subjective: form.get("subjective"),
+          distillGoal: form.get("distillGoal")
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "生成单帖复盘失败。");
+      setPostReviewPrompt(data.prompt || "");
+      await refresh();
+      downloadText(`post-review-${selected.name}.md`, data.prompt || "");
+      showToast("单帖专家复盘 Prompt 已生成并下载。");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "生成单帖复盘失败。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function prepareIndustryLearning(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected) return;
+    const form = new FormData(event.currentTarget);
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/accounts/${selected.id}/industry-learning`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "prepare",
+          topic: form.get("topic"),
+          searchScope: form.get("searchScope")
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "生成行业学习任务失败。");
+      setIndustryLearningDraft({ research: data.research, commands: data.commands, researchPrompt: data.researchPrompt });
+      await refresh();
+      showToast("行业学习任务已生成。");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "生成行业学习任务失败。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function saveIndustryLearning(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected) return;
+    const form = new FormData(event.currentTarget);
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/accounts/${selected.id}/industry-learning`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "save-results",
+          researchId: industryLearningDraft.research?.id || selected.industryKnowledgeResearches?.[0]?.id,
+          topic: form.get("topic"),
+          searchScope: form.get("searchScope"),
+          rawResults: form.get("rawResults"),
+          summaryMarkdown: form.get("summaryMarkdown")
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "保存行业学习失败。");
+      setIndustryLearningDraft((current) => ({ ...current, research: data.research }));
+      await refresh();
+      showToast("行业学习材料已保存。");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "保存行业学习失败。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function saveExpertRules(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected) return;
+    const form = new FormData(event.currentTarget);
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/accounts/${selected.id}/expert-rules`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          rulesJson: form.get("rulesJson"),
+          source: form.get("source") || "manual"
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "保存规则失败。");
+      await refresh();
+      showToast(`已保存 ${data.rules?.length || 0} 条候选规则。`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "保存规则失败。");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function loadHealth() {
@@ -1264,8 +1472,8 @@ export function XhsMasterApp() {
               saveImageStyleStudy={saveImageStyleStudy}
               imagePromptResults={imagePromptResults}
               generateImagePrompt={generateImagePrompt}
-              weddingImagePlanResult={selected ? weddingImagePlanResults[selected.id] : null}
-              generateWeddingImagePlan={generateWeddingImagePlan}
+              batchImagePostResult={selected ? batchImagePostResults[selected.id] : null}
+              generateBatchImagePosts={generateBatchImagePosts}
               copy={copy}
               loading={loading}
             />
@@ -1294,7 +1502,29 @@ export function XhsMasterApp() {
             />
           )}
           {activeTab === "drafts" && <DraftPanel note={selectedNote} saveDraft={saveDraft} />}
-          {activeTab === "reports" && <ReportsPanel generateReport={generateReport} latestPlan={latestPlan} />}
+          {activeTab === "reports" && (
+            <ReportsPanel
+              selected={selected}
+              latestPlan={latestPlan}
+              selectedNoteId={selectedNote?.id ?? null}
+              setSelectedNoteId={setSelectedNoteId}
+              generatePostReview={generatePostReview}
+              saveExpertRules={saveExpertRules}
+              postReviewPrompt={postReviewPrompt}
+              copy={copy}
+            />
+          )}
+          {activeTab === "learning" && (
+            <IndustryLearningPanel
+              selected={selected}
+              draft={industryLearningDraft}
+              prepareIndustryLearning={prepareIndustryLearning}
+              saveIndustryLearning={saveIndustryLearning}
+              saveExpertRules={saveExpertRules}
+              copy={copy}
+              loading={loading}
+            />
+          )}
           {activeTab === "health" && <HealthPanel health={health} loadHealth={loadHealth} />}
         </section>
       </main>
@@ -1315,14 +1545,14 @@ function Dashboard({
 }) {
   const cards = [
     ["账号策划", selected?.strategy ? "已可用" : "待创建", "strategy"],
-    ["上传素材", `${selected?.assets?.length ?? 0}`, "assets"],
     ["本周内容", `${selected?.weeklyPlans?.[0]?.noteTasks?.length ?? 0} 篇`, "weekly"],
     ["图片方案", selected?.weeklyPlans?.[0]?.noteTasks?.length ? "可生成" : "待计划", "images"],
     ["笔记草稿", selected?.weeklyPlans?.[0]?.noteTasks?.length ? "可生成" : "待计划", "prompts"],
-    ["发布互动", selected?.interactionPlans?.[0]?.status || "可选", "interactions"]
+    ["素材库", `${selected?.assets?.length ?? 0} 个`, "assets"],
+    ["发布后互动", selected?.interactionPlans?.[0]?.status || "可选", "interactions"]
   ];
   const optionalCards = [
-    ["爆款参考", selected?.referenceResearches?.[0]?.status || "可选增强", "reference"],
+    ["爆款研究", selected?.referenceResearches?.[0]?.status || "可选增强", "reference"],
     ["配置文件", selected?.profile ? `v${selected.profile.version}` : "自动生成", "agents"]
   ];
   return (
@@ -1360,7 +1590,7 @@ function Dashboard({
         <div className="mb-3">
           <h2 className="text-lg font-semibold">可选增强</h2>
           <p className="mt-1 text-sm text-ink/60">
-            创建账号后策划已经可用，可以直接进入素材、本周内容、图片方案和笔记草稿。爆款参考只在需要校准同行风格时再做。
+            创建账号后策划已经可用，可以直接进入素材、本周内容、图片方案和笔记草稿。爆款研究只在需要校准同行风格时再做。
           </p>
         </div>
         <div className="grid gap-3 md:grid-cols-2">
@@ -1397,6 +1627,7 @@ function AccountsPanel(props: {
 }) {
   const { templates, accountForm, setAccountForm, createAccount, loading } = props;
   const field = (key: keyof typeof accountForm, value: string) => setAccountForm({ ...accountForm, [key]: value });
+  const switchAccountType = (accountType: string) => setAccountForm(switchAccountTypeForm(accountForm, templates, accountType));
   const selectedTemplate = templates.find((template) => template.typeKey === accountForm.accountType);
   const defaults = accountTypeDefaults(accountForm.accountType, selectedTemplate);
   const choices = accountChoiceOptions(accountForm.accountType);
@@ -1421,7 +1652,7 @@ function AccountsPanel(props: {
           <Input label="所在城市/区域" value={accountForm.city} onChange={(v) => field("city", v)} placeholder="例如 杭州 / 大理 / 上海静安" />
           <label className="field md:col-span-2">
             <span>客户类型</span>
-            <select value={accountForm.accountType} onChange={(e) => field("accountType", e.target.value)}>
+            <select value={accountForm.accountType} onChange={(e) => switchAccountType(e.target.value)}>
               {templates.map((template) => (
                 <option key={template.typeKey} value={template.typeKey}>
                   {template.name}
@@ -1509,7 +1740,7 @@ function AccountsPanel(props: {
             <button
               key={template.typeKey}
               type="button"
-              onClick={() => field("accountType", template.typeKey)}
+              onClick={() => switchAccountType(template.typeKey)}
               className={clsx(
                 "w-full rounded border bg-white p-3 text-left transition hover:border-teal/40 hover:bg-teal/5",
                 accountForm.accountType === template.typeKey ? "border-teal/60 bg-teal/5 ring-2 ring-teal/15" : "border-ink/10"
@@ -1547,6 +1778,10 @@ function ReferenceResearchPanel(props: {
   const researchPrompt = draft.researchPrompt || latest?.researchPrompt || "";
   const summaryMarkdown = draft.summary?.summaryMarkdown || latest?.summaryMarkdown || "";
   const commandBundle = commands.map((command: any) => command.command).join("\n");
+  const taskBrief = commands
+    .map((command: any) => [command.category, command.description, command.safetyNote].filter(Boolean).join("｜"))
+    .join("\n");
+  const researchTask = [taskBrief ? `# 爆款研究任务说明\n${taskBrief}` : "", commandBundle, researchPrompt].filter(Boolean).join("\n\n");
   const hasSearchPack = Boolean(commands.length || researchPrompt);
   const hasSummary = Boolean(summaryMarkdown.trim());
 
@@ -1555,13 +1790,13 @@ function ReferenceResearchPanel(props: {
       <div className="panel">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h2 className="section-title">爆款参考增强（可选）</h2>
+            <h2 className="section-title">爆款研究</h2>
             <p className="mt-1 max-w-3xl text-sm text-ink/60">
-              账号创建后策划已经可用；这页只在需要吸收同类型爆款风格、标题结构、图片顺序和评论痛点时使用。研究结果会增强后续策划、图片方案和正文草稿，但不阻塞主流程。
+              账号创建后策划已经可用；这页用于吸收全国同类型爆款风格、标题结构、图片顺序和评论痛点。本地内容只作为落地差异补充，避免风格被所在城市局限。
             </p>
           </div>
           <button type="button" onClick={prepareReferenceResearch} disabled={loading} className="primary-button">
-            <Search size={17} /> 生成爆款参考包
+            <Search size={17} /> 生成爆款研究
           </button>
         </div>
 
@@ -1569,7 +1804,7 @@ function ReferenceResearchPanel(props: {
           <div className={clsx("rounded border p-4", hasSearchPack ? "border-teal/30 bg-teal/5" : "border-ink/10 bg-white")}>
             <div className="text-xs font-medium text-ink/55">1. 搜索要求</div>
             <div className="mt-2 font-semibold">{hasSearchPack ? "已生成" : "待生成"}</div>
-            <p className="mt-2 text-sm text-ink/60">复制研究要求给搜索工具，只读搜索参考账号。</p>
+          <p className="mt-2 text-sm text-ink/60">复制一条研究任务给龙虾，优先只读搜索全国同类型爆款。</p>
           </div>
           <div className={clsx("rounded border p-4", latest?.rawResults ? "border-teal/30 bg-teal/5" : "border-ink/10 bg-white")}>
             <div className="text-xs font-medium text-ink/55">2. 返回结果</div>
@@ -1595,54 +1830,32 @@ function ReferenceResearchPanel(props: {
         <div className="panel">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <h2 className="section-title">给 xiaohongshu_auto_op 的参考包</h2>
-              <p className="mt-1 text-sm text-ink/60">通常只需要复制“命令包”和“研究要求”各一次。</p>
-            </div>
-            <div className="flex gap-2">
-              <IconButton title="复制命令包" onClick={() => copy(commandBundle)} icon={<Clipboard size={17} />} />
-              <IconButton title="复制研究要求" onClick={() => copy(researchPrompt)} icon={<FileText size={17} />} />
+              <h2 className="section-title">给龙虾的爆款研究任务</h2>
+              <p className="mt-1 text-sm text-ink/60">只需要复制下面这一条任务给龙虾执行。</p>
             </div>
           </div>
 
           {!hasSearchPack ? (
-            <EmptyState text="可选步骤：点击“生成爆款参考包”后，这里会出现可复制的命令和研究要求。" />
+            <EmptyState text="点击“生成爆款研究”后，这里会出现一条可复制给龙虾的研究任务。" />
           ) : (
             <div className="space-y-3">
               <div className="rounded border border-ink/10 bg-white p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <div className="text-sm font-medium">命令包</div>
-                  <button type="button" onClick={() => copy(commandBundle)} className="secondary-button">
+                  <div className="text-sm font-medium">爆款研究任务</div>
+                  <button type="button" onClick={() => copy(researchTask)} className="secondary-button">
                     <Clipboard size={16} /> 复制
                   </button>
                 </div>
-                <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded bg-ink p-3 text-xs leading-5 text-white">{commandBundle}</pre>
+                <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded bg-ink p-3 text-xs leading-5 text-white">{researchTask}</pre>
                 <p className="mt-2 text-xs text-coral">只读探索命令，不发布、不关注、不私信、不互动。</p>
               </div>
-
-              <details className="rounded border border-ink/10 bg-white p-3">
-                <summary className="cursor-pointer text-sm font-medium">展开查看单条命令说明</summary>
-                <div className="mt-3 space-y-3">
-                  {commands.map((command: any) => (
-                    <div key={`${command.category}-${command.command}`} className="rounded border border-ink/10 p-3">
-                      <div className="font-medium">{command.category}</div>
-                      <div className="mt-1 text-xs text-ink/60">{command.description}</div>
-                      <code className="mt-2 block overflow-auto rounded bg-ink/90 px-3 py-2 text-xs text-white">{command.command}</code>
-                    </div>
-                  ))}
-                </div>
-              </details>
-
-              <details className="rounded border border-ink/10 bg-white p-3">
-                <summary className="cursor-pointer text-sm font-medium">展开查看研究要求</summary>
-                <textarea className="code-textarea mt-3 min-h-[280px]" value={researchPrompt} readOnly />
-              </details>
             </div>
           )}
         </div>
 
         <form className="panel" onSubmit={saveReferenceResearch}>
           <h2 className="section-title">粘贴参考结果，增强现有策划</h2>
-          <p className="mt-1 text-sm text-ink/60">把 xiaohongshu_auto_op 返回的研究报告粘进来，大模型会提炼可借鉴的爆款风格，并更新当前策划。没有参考结果也可以继续主流程。</p>
+          <p className="mt-1 text-sm text-ink/60">把 xiaohongshu_auto_op 返回的研究报告粘进来，大模型会优先提炼全国爆款规律，并更新当前策划。本地结果只作为补充对照。</p>
           <div className="mt-4 grid gap-3">
             <label className="field">
               <span>重点参考账号</span>
@@ -1755,6 +1968,8 @@ function AssetsPanel(props: {
   const { selected, uploadAsset, importAssetFolder, generateManifest, manifest, copy } = props;
   if (!selected) return <EmptyState />;
   const copyText = assetUiCopy(selected.accountType);
+  const authorizedCount = selected.assets.filter((asset) => ["已授权", "可商用"].includes(asset.authorizationState)).length;
+  const pendingCount = selected.assets.filter((asset) => asset.authorizationState === "待确认").length;
   return (
     <div className="space-y-5">
       <div className="panel">
@@ -1762,23 +1977,28 @@ function AssetsPanel(props: {
           <div>
             <h2 className="section-title">素材库</h2>
             <p className="mt-1 max-w-3xl text-sm leading-6 text-ink/60">
-              先把客户提供的真实图片上传进来。系统会记住每张图的文件名、来源和授权状态，后面生成图片方案时会优先使用这些真实素材。
+              管理整个账号长期可复用的真实素材。只给某一篇笔记临时上传几张图时，去“图片方案 → 单篇精修 → 手动指定图片”更直接。
             </p>
           </div>
-          <div className="rounded bg-teal/10 px-3 py-2 text-sm font-medium text-teal">真实素材越清楚，改图越稳</div>
+          <button type="button" onClick={generateManifest} className="secondary-button">
+            <FileText size={17} /> 生成素材清单
+          </button>
         </div>
         <div className="grid gap-3 md:grid-cols-3">
           <div className="rounded border border-ink/10 bg-white p-3">
-            <div className="font-medium">素材怎么给？</div>
-            <p className="mt-1 text-sm text-ink/60">少量或中等数量图片直接网页批量上传；特别大的素材包可以先同步到本机文件夹再登记路径。</p>
+            <div className="text-xs font-medium text-ink/55">已登记素材</div>
+            <div className="mt-2 text-2xl font-semibold">{selected.assets.length}</div>
+            <p className="mt-1 text-sm text-ink/60">账号级长期素材，会被批量自动模式和文件夹自动选图优先参考。</p>
           </div>
           <div className="rounded border border-ink/10 bg-white p-3">
-            <div className="font-medium">系统会怎么用？</div>
-            <p className="mt-1 text-sm text-ink/60">系统会记录图片名字、来源、适合内容和风险备注，方便后续按菜品、环境、路线或产品自动匹配。</p>
+            <div className="text-xs font-medium text-ink/55">授权状态</div>
+            <div className="mt-2 text-sm font-semibold">可用 {authorizedCount} / 待确认 {pendingCount}</div>
+            <p className="mt-1 text-sm text-ink/60">未确认肖像、价格、地点、路线、档期或资质时，生成内容必须保留核验提示。</p>
           </div>
           <div className="rounded border border-ink/10 bg-white p-3">
-            <div className="font-medium">图片不够怎么办？</div>
-            <p className="mt-1 text-sm text-ink/60">先生成补拍清单；需要 AI 改图时，也只基于真实菜品、真实环境或真实现场图做延展。</p>
+            <div className="text-xs font-medium text-ink/55">龙虾读取目录</div>
+            <div className="mt-2 truncate text-sm font-semibold">{selected.assetsPath}</div>
+            <p className="mt-1 text-sm text-ink/60">网页上传的文件会落到这个本机目录，龙虾读取的是这些本地文件。</p>
           </div>
         </div>
       </div>
@@ -1792,8 +2012,8 @@ function AssetsPanel(props: {
       >
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h2 className="section-title">上传图片 / 视频素材</h2>
-            <p className="text-sm text-ink/60">可一次选择多张图片。建议提前把文件名改成菜品名、环境名、路线节点或产品名。</p>
+            <h2 className="section-title">添加长期素材</h2>
+            <p className="text-sm text-ink/60">适合一组以后会反复使用的真实素材；如果只是某篇笔记临时用图，请在“图片方案”里上传。</p>
           </div>
           <button type="submit" className="primary-button">
             <Upload size={17} /> 上传
@@ -1806,14 +2026,6 @@ function AssetsPanel(props: {
             <span className="text-xs text-ink/50">上传后会尽量保留原文件名，便于后面自动识别“清蒸鲈鱼”“包间”“停车场入口”等素材。</span>
           </label>
           <label className="field">
-            <span>来源类型</span>
-            <select name="sourceType" defaultValue={copyText.source}>
-              {sourceTypes.map((type) => (
-                <option key={type}>{type}</option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
             <span>授权状态</span>
             <select name="authorizationState" defaultValue="待确认">
               {authStates.map((state) => (
@@ -1821,14 +2033,27 @@ function AssetsPanel(props: {
               ))}
             </select>
           </label>
-          <Input name="location" label="拍摄地点" />
-          <Input name="shotAt" label="拍摄时间" />
-          <Input name="tags" label="标签" placeholder={copyText.singleTags} />
-          <Input name="suitableTypes" label="适合什么内容" placeholder={copyText.singleSuitable} />
           <label className="flex items-center gap-2 rounded border border-ink/10 bg-white px-3 py-2 text-sm">
             <input name="coverReady" type="checkbox" value="true" /> 适合封面
           </label>
-          <Input name="riskNotes" label="核验/风险备注" placeholder={copyText.singleRisk} />
+          <details className="rounded border border-ink/10 bg-white p-3 md:col-span-4">
+            <summary className="cursor-pointer text-sm font-medium">高级信息（可选）</summary>
+            <div className="mt-3 grid gap-3 md:grid-cols-4">
+              <label className="field">
+                <span>来源类型</span>
+                <select name="sourceType" defaultValue={copyText.source}>
+                  {sourceTypes.map((type) => (
+                    <option key={type}>{type}</option>
+                  ))}
+                </select>
+              </label>
+              <Input name="location" label="拍摄地点" />
+              <Input name="shotAt" label="拍摄时间" />
+              <Input name="tags" label="标签" placeholder={copyText.singleTags} />
+              <Input name="suitableTypes" label="适合什么内容" placeholder={copyText.singleSuitable} />
+              <Input name="riskNotes" label="核验/风险备注" placeholder={copyText.singleRisk} />
+            </div>
+          </details>
         </div>
       </form>
 
@@ -1841,7 +2066,7 @@ function AssetsPanel(props: {
       >
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="section-title">已有大素材包</h2>
+            <h2 className="section-title">登记大素材包（高级）</h2>
             <p className="mt-1 text-sm text-ink/60">
               图片特别多、已经在这台电脑或共享盘里整理好时，用这里登记文件夹路径；系统只登记路径，不复制文件。
             </p>
@@ -1880,17 +2105,14 @@ function AssetsPanel(props: {
       </form>
 
       <div className="panel">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4">
           <div>
             <h2 className="section-title">已登记素材</h2>
             <p className="mt-1 text-sm text-ink/60">生成素材清单后，系统会知道素材来源、授权状态、适合内容、封面可用性和风险备注。</p>
           </div>
-          <button type="button" onClick={generateManifest} className="secondary-button">
-            <FileText size={17} /> 生成素材清单
-          </button>
         </div>
         {!selected.assets.length ? (
-          <EmptyState text="还没有素材。建议先上传图片；如果是大批量客户素材，再登记已有文件夹。没有真实素材时，只能生成补拍清单和 AI 示意方案。" />
+          <EmptyState text="还没有素材。建议先上传图片；如果是大批量客户素材，再登记已有文件夹。没有真实素材时，只能生成补拍清单、信息卡或辅助图方案。" />
         ) : (
           <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-4">
             {selected.assets.map((asset) => (
@@ -2115,6 +2337,7 @@ function PlanPreview({ plan }: { plan?: WeeklyPlan }) {
 
 function isWeddingUiAccount(account?: Account) {
   if (!account) return false;
+  if (account.accountType === "wedding_planning") return true;
   return /婚礼|婚庆|婚宴|婚纱|婚摄|婚照|备婚|新娘|新郎|新人|婚礼策划|婚礼布置|宴会设计|仪式区|甜品台|迎宾区/.test(
     [account.name, account.personaBase, account.contentDirections, account.materialCondition, account.businessGoals, account.targetUsers].join(" ")
   );
@@ -2153,9 +2376,9 @@ function ImagesPanel(props: {
   prepareImageStyleStudy: () => void;
   saveImageStyleStudy: (event: React.FormEvent<HTMLFormElement>) => void;
   imagePromptResults: Record<number, ImagePromptResult>;
-  generateImagePrompt: (task: NoteTask, options?: { openclawAssetsDir?: string; openclawImagePaths?: string }) => void;
-  weddingImagePlanResult?: WeddingImagePlanResult | null;
-  generateWeddingImagePlan: (options?: { weeks?: string; openclawAssetsDir?: string; openclawImagePaths?: string; planningGoal?: string }) => void;
+  generateImagePrompt: (task: NoteTask, options?: SingleImagePromptOptions) => void;
+  batchImagePostResult?: BatchImagePostsResult | null;
+  generateBatchImagePosts: (options?: { weeks?: string; openclawAssetsDir?: string; openclawImagePaths?: string; planningGoal?: string }) => void;
   copy: (text: string) => void;
   loading: boolean;
 }) {
@@ -2169,8 +2392,8 @@ function ImagesPanel(props: {
     saveImageStyleStudy,
     imagePromptResults,
     generateImagePrompt,
-    weddingImagePlanResult,
-    generateWeddingImagePlan,
+    batchImagePostResult,
+    generateBatchImagePosts,
     copy,
     loading
   } = props;
@@ -2182,8 +2405,315 @@ function ImagesPanel(props: {
   const stylePrompt = imageStyleDraft.researchPrompt || latestStudy?.researchPrompt || "";
   const copyText = assetUiCopy(selected?.accountType);
   const isWedding = isWeddingUiAccount(selected);
-  const commandList = [...(weddingImagePlanResult?.commands || []), ...(result?.commands || [])];
+  const commandList = [...(batchImagePostResult?.commands || []), ...(result?.commands || [])];
   const [weddingPlanningGoal, setWeddingPlanningGoal] = useState(weddingPlanningGoalPresets[0].value);
+  const [imageWorkflowMode, setImageWorkflowMode] = useState<"batch" | "single">("batch");
+  const [singleSourceMode, setSingleSourceMode] = useState<SingleImageSourceMode>("folder_select");
+  const [singleImageGoal, setSingleImageGoal] = useState("围绕这篇笔记内容，生成封面、图集顺序、图上文字、正文结构和风险核验。");
+  const [singleImageCount, setSingleImageCount] = useState("5");
+
+  {
+    const batchCommand = batchImagePostResult?.commands?.[0];
+    const activeSingleCommand = result?.commands?.[0];
+    const accountKindLabel = isWedding ? "婚礼现场图" : "素材图片";
+    const batchTitle = isWedding ? "用婚礼现场图自动生成批量帖子" : "用素材文件夹自动生成批量帖子";
+    const batchDescription = isWedding
+      ? "适合已经有一批婚礼现场图，但还没有想好每篇发什么。龙虾会先读图，再结合全国同类型爆款，直接产出多篇帖子方案。"
+      : "适合已经有一批素材图，但还没有想好每篇发什么。龙虾会先读图，再结合全国同类型爆款，直接产出多篇帖子方案。";
+    const defaultBatchGoal = isWedding
+      ? "例如：优先从婚礼蛋糕、花艺、仪式区、迎宾区、桌花中找高收藏选题。"
+      : "例如：优先从真实素材里找高收藏主题，直接生成一周内容。";
+    return (
+      <div className="space-y-5">
+        <div className="panel">
+          <div className="mb-4">
+            <h2 className="section-title">图片生成帖子</h2>
+            <p className="mt-1 text-sm text-ink/60">先选择要批量处理一整个文件夹，还是只精修一篇笔记。单篇模式再决定图片由 AI 生成、用户指定，或由龙虾从文件夹自动挑选。</p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {[
+              ["batch", "批量自动模式", "给一个素材文件夹，直接生成一周或两周的多篇帖子。"],
+              ["single", "单篇精修模式", "先确定一篇笔记，再处理这一篇的图片、图集顺序和正文。"]
+            ].map(([mode, title, desc]) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setImageWorkflowMode(mode as "batch" | "single")}
+                className={clsx("rounded border p-4 text-left transition", imageWorkflowMode === mode ? "border-teal bg-teal/10 ring-2 ring-teal/15" : "border-ink/10 bg-white hover:border-teal/40")}
+              >
+                <div className="font-semibold">{title}</div>
+                <div className="mt-1 text-sm leading-6 text-ink/60">{desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {imageWorkflowMode === "batch" ? (
+          <div className="grid gap-5 xl:grid-cols-[0.42fr_0.58fr]">
+            <form
+              className="panel border-teal/30"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const form = new FormData(event.currentTarget);
+                generateBatchImagePosts({
+                  weeks: String(form.get("weeks") || "1"),
+                  openclawAssetsDir: String(form.get("openclawAssetsDir") || ""),
+                  openclawImagePaths: String(form.get("openclawImagePaths") || ""),
+                  planningGoal: String(form.get("planningGoal") || "")
+                });
+              }}
+            >
+              <div className="mb-4">
+                <div className="mb-2 inline-flex rounded bg-teal/10 px-3 py-1 text-xs font-semibold text-teal">批量自动模式</div>
+                <h2 className="section-title">{batchTitle}</h2>
+                <p className="mt-1 text-sm text-ink/60">{batchDescription}</p>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-[160px_1fr]">
+                <label className="field">
+                  <span>生成周期</span>
+                  <select name="weeks" defaultValue="1">
+                    <option value="1">一周，约 5-7 篇</option>
+                    <option value="2">两周，约 10-14 篇</option>
+                  </select>
+                </label>
+                <Input
+                  name="openclawAssetsDir"
+                  label={`${accountKindLabel}文件夹${selected?.assets?.length ? `（已登记 ${selected?.assets.length} 张素材）` : ""}`}
+                  defaultValue={selected?.assetsPath || ""}
+                  placeholder="/Users/.../素材图片"
+                  help="把客户提供的一批素材图放在这个文件夹里。"
+                />
+              </div>
+
+              <div className="mt-3 grid gap-3">
+                <Textarea
+                  name="planningGoal"
+                  label="批量生成要求"
+                  value={weddingPlanningGoal}
+                  onChange={setWeddingPlanningGoal}
+                  placeholder={defaultBatchGoal}
+                  help="这会写进给龙虾的批量任务。"
+                />
+                <Textarea
+                  name="openclawImagePaths"
+                  label="优先分析的图片（可选）"
+                  placeholder={isWedding ? "婚礼蛋糕.jpg\n香槟色花艺.jpg\n仪式区拱门.jpg\n迎宾牌.jpg" : "封面候选.jpg\n现场图.jpg\n信息截图.jpg"}
+                  help="通常不用填；只有想让龙虾优先看某几张图时再填。"
+                />
+              </div>
+
+              <button type="submit" disabled={loading || !selected} className="primary-button mt-4">
+                <Sparkles size={17} /> 生成批量帖子任务
+              </button>
+              {batchImagePostResult?.planningPrompt.path && <div className="mt-3 rounded bg-teal/10 px-3 py-2 text-xs text-teal">{batchImagePostResult?.planningPrompt.path}</div>}
+            </form>
+
+            <div className="panel border-teal/30">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="section-title">批量任务结果</h2>
+                  <p className="mt-1 text-sm text-ink/60">一条任务给龙虾：读取文件夹、自动分组选题、生成多篇帖子。</p>
+                </div>
+                <div className="flex gap-2">
+                  <IconButton title="复制批量任务" onClick={() => copy(batchImagePostResult?.planningPrompt.content || "")} icon={<Clipboard size={17} />} />
+                  <IconButton title="导出 Markdown" onClick={() => downloadText(`batch-image-posts-${selected?.name || "draft"}.md`, batchImagePostResult?.planningPrompt.content || "")} icon={<Download size={17} />} />
+                </div>
+              </div>
+              {batchCommand && (
+                <div className="mb-3 rounded border border-ink/10 bg-white p-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium">{batchCommand.category}</div>
+                      <div className="text-xs text-ink/60">{batchCommand.description}</div>
+                    </div>
+                    <IconButton title="复制执行命令" onClick={() => copy(batchCommand.command)} icon={<Clipboard size={16} />} />
+                  </div>
+                  <code className="block overflow-auto rounded bg-ink px-3 py-2 text-xs text-white">{batchCommand.command}</code>
+                  <div className="mt-2 text-xs text-coral">{batchCommand.safetyNote}</div>
+                </div>
+              )}
+              <textarea
+                className="code-textarea min-h-[620px]"
+                value={batchImagePostResult?.planningPrompt.content || "点击左侧“生成批量帖子任务”后，这里会显示完整任务。"}
+                readOnly
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="grid gap-5 xl:grid-cols-[0.42fr_0.58fr]">
+            <form
+              className="panel"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!note) return;
+                const form = new FormData(event.currentTarget);
+                const run = async () => {
+                  let imagePaths = String(form.get("openclawImagePaths") || "");
+                  let assetsDir = String(form.get("openclawAssetsDir") || "");
+                  if (singleSourceMode === "manual_images") {
+                    const files = form
+                      .getAll("manualImageFiles")
+                      .filter((item): item is File => item instanceof File && item.size > 0);
+                    if (files.length) {
+                      const uploadForm = new FormData();
+                      uploadForm.set("accountId", String(selected?.id || ""));
+                      uploadForm.set("sourceType", "真实素材");
+                      uploadForm.set("authorizationState", "待确认");
+                      uploadForm.set("tags", "单篇精修上传");
+                      uploadForm.set("suitableTypes", note.topicTitle);
+                      for (const file of files) uploadForm.append("files", file);
+                      const uploadRes = await fetch("/api/assets/upload", { method: "POST", body: uploadForm });
+                      const uploadData = await uploadRes.json();
+                      if (!uploadRes.ok) throw new Error(uploadData.error || "上传图片失败。");
+                      imagePaths = (uploadData.assets || []).map((asset: { filePath: string; localFilePath?: string }) => asset.localFilePath || asset.filePath).join("\n");
+                      assetsDir = selected?.assetsPath || assetsDir;
+                    }
+                  }
+                  await generateImagePrompt(note, {
+                  imageSourceMode: singleSourceMode,
+                  noteContent: String(form.get("noteContent") || ""),
+                  singleGoal: String(form.get("singleGoal") || ""),
+                  imageCount: String(form.get("imageCount") || ""),
+                    openclawAssetsDir: assetsDir,
+                    openclawImagePaths: imagePaths
+                  });
+                };
+                run().catch((error) => window.alert(error instanceof Error ? error.message : "生成单篇图片方案失败。"));
+              }}
+            >
+              <div className="mb-4">
+                <div className="mb-2 inline-flex rounded bg-ink/5 px-3 py-1 text-xs font-semibold text-ink/60">单篇精修模式</div>
+                <h2 className="section-title">先确定一篇笔记，再决定图片怎么来</h2>
+                <p className="mt-1 text-sm text-ink/60">适合已经有明确选题，只想把这一篇的封面、图集、正文和风险边界打磨清楚。</p>
+              </div>
+
+              {plan && note ? (
+                <label className="field">
+                  <span>选择笔记</span>
+                  <select value={note.id} onChange={(event) => setSelectedNoteId(Number(event.target.value))}>
+                    {plan.noteTasks.map((task) => (
+                      <option key={task.id} value={task.id}>{task.topicTitle}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <EmptyState text="先到“本周内容”生成计划，再回来精修单篇笔记。" />
+              )}
+
+              <div className="mt-4">
+                <div className="mb-2 text-sm font-medium text-ink/70">图片来源</div>
+                <div className="grid gap-2 md:grid-cols-3">
+                  {[
+                    ["folder_select", "文件夹自动选图", "给一个文件夹，让龙虾按这篇笔记自动挑图。"],
+                    ["manual_images", "手动指定图片", "已经挑好图片，让系统排序、写图上文字和正文。"],
+                    ["ai_generate", "AI 辅助图", "没有真实图时，只生成信息卡、结构图或低拟真辅助画面。"]
+                  ].map(([mode, title, desc]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setSingleSourceMode(mode as SingleImageSourceMode)}
+                      className={clsx("rounded border p-3 text-left transition", singleSourceMode === mode ? "border-teal bg-teal/10 text-teal" : "border-ink/10 bg-white text-ink/70 hover:border-teal/40")}
+                    >
+                      <div className="text-sm font-semibold">{title}</div>
+                      <div className="mt-1 text-xs leading-5 text-ink/60">{desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {note && (
+                <div className="mt-4 rounded border border-ink/10 bg-white p-3">
+                  <div className="text-sm font-medium">当前笔记目标</div>
+                  <div className="mt-2 text-sm leading-6 text-ink/65">
+                    <div>封面方向：{note.coverCopyDirection || "未设置"}</div>
+                    <div>所需图片：{note.requiredImages || "按选题生成图卡结构"}</div>
+                    <div>推荐素材：{note.recommendedAssets || "暂无，生成素材缺口"}</div>
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-4 grid gap-3">
+                <Textarea
+                  name="noteContent"
+                  label="这篇笔记内容/方向"
+                  defaultValue={note ? [note.coreView, note.bodyStructure].filter(Boolean).join("\n") : ""}
+                  placeholder="写清楚这一篇要表达什么，例如：围绕婚礼蛋糕细节，拆解为什么它能提升整场婚礼高级感。"
+                />
+                <div className="grid gap-3 md:grid-cols-[120px_1fr]">
+                  <Input name="imageCount" label="图片数量" defaultValue={singleImageCount} onChange={setSingleImageCount} placeholder="5" />
+                  {singleSourceMode === "manual_images" ? (
+                    <div className="rounded border border-ink/10 bg-white p-3 text-sm leading-6 text-ink/60">
+                      上传的图片会保存到当前账号素材库：{selected?.assetsPath || "assets/当前账号"}
+                    </div>
+                  ) : (
+                    <Input
+                      name="openclawAssetsDir"
+                      label={singleSourceMode === "ai_generate" ? "参考素材文件夹（可选）" : "图片文件夹"}
+                      defaultValue={selected?.assetsPath || ""}
+                      placeholder="/Users/.../素材图片"
+                      help={singleSourceMode === "ai_generate" ? "AI 辅助图不作为真实证据图；有真实素材时仍优先使用真实素材。" : "给一个文件夹，让龙虾从里面自动挑选适合这篇笔记的图片。"}
+                    />
+                  )}
+                </div>
+                {singleSourceMode === "manual_images" && (
+                  <label className="field">
+                    <span>上传这篇要用的图片</span>
+                    <input name="manualImageFiles" type="file" accept="image/*" multiple required />
+                    <span className="text-xs leading-5 text-ink/50">
+                      上传后系统会保存到本地素材库，并把保存后的文件路径写入给龙虾的任务。龙虾处理的是本机文件，不是浏览器临时文件。
+                    </span>
+                  </label>
+                )}
+                {singleSourceMode === "manual_images" && <input type="hidden" name="openclawAssetsDir" value={selected?.assetsPath || ""} readOnly />}
+                {singleSourceMode !== "manual_images" && <input type="hidden" name="openclawImagePaths" value="" readOnly />}
+                <Textarea
+                  name="singleGoal"
+                  label="本篇精修要求"
+                  value={singleImageGoal}
+                  onChange={setSingleImageGoal}
+                  placeholder="例如：封面要突出蛋糕近景，正文偏备婚收藏，不要虚构价格和新人反馈。"
+                />
+              </div>
+
+              <button type="submit" disabled={loading || !note} className="primary-button mt-4">
+                <ImageIcon size={17} /> {singleSourceMode === "ai_generate" ? "生成 AI 辅助图方案" : singleSourceMode === "manual_images" ? "用指定图片生成单篇方案" : "让龙虾从文件夹自动选图"}
+              </button>
+            </form>
+
+            <div className="space-y-5">
+              <div className="panel">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="section-title">单篇任务结果</h2>
+                    <p className="mt-1 text-sm text-ink/60">这里显示当前单篇模式生成的任务和执行命令。</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <IconButton title="复制单篇任务" onClick={() => copy(result?.imagePrompt.content || "")} icon={<Clipboard size={17} />} />
+                    <IconButton title="导出 Markdown" onClick={() => downloadText(`note-${note?.id || "draft"}-image-prompt.md`, result?.imagePrompt.content || "")} icon={<Download size={17} />} />
+                  </div>
+                </div>
+                {activeSingleCommand && (
+                  <div className="mb-3 rounded border border-ink/10 bg-white p-3">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-medium">{activeSingleCommand.category}</div>
+                        <div className="text-xs text-ink/60">{activeSingleCommand.description}</div>
+                      </div>
+                      <IconButton title="复制执行命令" onClick={() => copy(activeSingleCommand.command)} icon={<Clipboard size={16} />} />
+                    </div>
+                    <code className="block overflow-auto rounded bg-ink px-3 py-2 text-xs text-white">{activeSingleCommand.command}</code>
+                    <div className="mt-2 text-xs text-coral">{activeSingleCommand.safetyNote}</div>
+                  </div>
+                )}
+                <textarea className="code-textarea min-h-[620px]" value={result?.imagePrompt.content || "选择单篇来源并点击生成后，这里会显示完整任务。"} readOnly />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="grid gap-5 xl:grid-cols-[0.42fr_0.58fr]">
@@ -2253,7 +2783,7 @@ function ImagesPanel(props: {
             onSubmit={(event) => {
               event.preventDefault();
               const form = new FormData(event.currentTarget);
-              generateWeddingImagePlan({
+              generateBatchImagePosts({
                 weeks: String(form.get("weeks") || "1"),
                 openclawAssetsDir: String(form.get("openclawAssetsDir") || ""),
                 openclawImagePaths: String(form.get("openclawImagePaths") || ""),
@@ -2293,7 +2823,7 @@ function ImagesPanel(props: {
               </label>
               <Input
                 name="openclawAssetsDir"
-                label={`婚礼图片文件夹${selected?.assets?.length ? `（已登记 ${selected.assets.length} 张素材）` : ""}`}
+                label={`婚礼图片文件夹${selected?.assets?.length ? `（已登记 ${selected?.assets.length} 张素材）` : ""}`}
                 defaultValue={selected?.assetsPath || ""}
                 placeholder="/Users/.../婚礼现场图"
                 help="可以填客户图片所在文件夹；不填则默认使用当前账号素材库。"
@@ -2339,8 +2869,8 @@ function ImagesPanel(props: {
               <Sparkles size={17} /> 生成给龙虾的一键规划 Prompt
             </button>
 
-            {weddingImagePlanResult?.planningPrompt.path && (
-              <div className="mt-3 rounded bg-teal/10 px-3 py-2 text-xs text-teal">{weddingImagePlanResult.planningPrompt.path}</div>
+            {batchImagePostResult?.planningPrompt.path && (
+              <div className="mt-3 rounded bg-teal/10 px-3 py-2 text-xs text-teal">{batchImagePostResult?.planningPrompt.path}</div>
             )}
           </form>
         )}
@@ -2369,8 +2899,8 @@ function ImagesPanel(props: {
           {plan && note ? (
             <label className="field">
               <span>选择本周内容</span>
-              <select value={note.id} onChange={(event) => setSelectedNoteId(Number(event.target.value))}>
-                {plan.noteTasks.map((task) => (
+              <select value={note?.id || ""} onChange={(event) => setSelectedNoteId(Number(event.target.value))}>
+                {plan?.noteTasks.map((task) => (
                   <option key={task.id} value={task.id}>
                     {task.topicTitle}
                   </option>
@@ -2385,9 +2915,9 @@ function ImagesPanel(props: {
             <div className="mt-4 rounded border border-ink/10 bg-white p-3">
               <div className="text-sm font-medium">当前图片目标</div>
               <div className="mt-2 text-sm leading-6 text-ink/65">
-                <div>封面方向：{note.coverCopyDirection || "未设置"}</div>
-                <div>所需图片：{note.requiredImages || "按选题生成图卡结构"}</div>
-                <div>推荐素材：{note.recommendedAssets || "暂无，生成素材缺口"}</div>
+                <div>封面方向：{note?.coverCopyDirection || "未设置"}</div>
+                <div>所需图片：{note?.requiredImages || "按选题生成图卡结构"}</div>
+                <div>推荐素材：{note?.recommendedAssets || "暂无，生成素材缺口"}</div>
               </div>
             </div>
           )}
@@ -2440,16 +2970,16 @@ function ImagesPanel(props: {
                 <p className="mt-1 text-sm text-ink/60">用于让龙虾先读 30 张婚礼图、研究同行热门笔记，再输出一周或两周内容规划。</p>
               </div>
               <div className="flex gap-2">
-                <IconButton title="复制批量规划 Prompt" onClick={() => copy(weddingImagePlanResult?.planningPrompt.content || "")} icon={<Clipboard size={17} />} />
+                <IconButton title="复制批量规划 Prompt" onClick={() => copy(batchImagePostResult?.planningPrompt.content || "")} icon={<Clipboard size={17} />} />
                 <IconButton
                   title="导出 Markdown"
-                  onClick={() => downloadText(`wedding-image-plan-${selected?.name || "draft"}.md`, weddingImagePlanResult?.planningPrompt.content || "")}
+                  onClick={() => downloadText(`wedding-image-plan-${selected?.name || "draft"}.md`, batchImagePostResult?.planningPrompt.content || "")}
                   icon={<Download size={17} />}
                 />
               </div>
             </div>
-            {weddingImagePlanResult?.planningPrompt.path && <div className="mb-2 rounded bg-teal/10 px-3 py-2 text-xs text-teal">{weddingImagePlanResult.planningPrompt.path}</div>}
-            {weddingImagePlanResult ? (
+            {batchImagePostResult?.planningPrompt.path && <div className="mb-2 rounded bg-teal/10 px-3 py-2 text-xs text-teal">{batchImagePostResult?.planningPrompt.path}</div>}
+            {batchImagePostResult ? (
               <div className="mb-3 grid gap-2 sm:grid-cols-3">
                 {[
                   ["复制 Prompt", "给龙虾读取图片和研究爆款。"],
@@ -2466,7 +2996,7 @@ function ImagesPanel(props: {
             <textarea
               className="code-textarea min-h-[360px]"
               value={
-                weddingImagePlanResult?.planningPrompt.content ||
+                batchImagePostResult?.planningPrompt.content ||
                 "点击左侧“生成批量规划 Prompt”后，这里会显示完整任务说明：批量读图、同行爆款研究、一周/两周笔记规划、后续单篇 Prompt 和风险边界。"
               }
               readOnly
@@ -2499,7 +3029,7 @@ function ImagesPanel(props: {
               <IconButton title="导出 Markdown" onClick={() => downloadText(`note-${note?.id || "draft"}-image-prompt.md`, result?.imagePrompt.content || "")} icon={<Download size={17} />} />
             </div>
           </div>
-          {result?.imagePrompt.path && <div className="mb-2 rounded bg-teal/10 px-3 py-2 text-xs text-teal">{result.imagePrompt.path}</div>}
+          {result?.imagePrompt.path && <div className="mb-2 rounded bg-teal/10 px-3 py-2 text-xs text-teal">{result?.imagePrompt.path}</div>}
           <textarea className="code-textarea min-h-[620px]" value={result?.imagePrompt.content || (note ? "点击生成后显示逐张图片方案。" : "先生成本周内容，再生成单篇图片方案。")} readOnly />
         </div>
       </div>
@@ -2763,23 +3293,278 @@ function DraftPanel({ note, saveDraft }: { note?: NoteTask; saveDraft: (event: R
   );
 }
 
-function ReportsPanel({ generateReport, latestPlan }: { generateReport: (event: React.FormEvent<HTMLFormElement>) => void; latestPlan?: WeeklyPlan }) {
+function ReportsPanel(props: {
+  selected?: Account;
+  latestPlan?: WeeklyPlan;
+  selectedNoteId: number | null;
+  setSelectedNoteId: (id: number) => void;
+  generatePostReview: (event: React.FormEvent<HTMLFormElement>) => void;
+  saveExpertRules: (event: React.FormEvent<HTMLFormElement>) => void;
+  postReviewPrompt: string;
+  copy: (text: string) => void;
+}) {
+  const { selected, latestPlan, selectedNoteId, setSelectedNoteId, generatePostReview, saveExpertRules, postReviewPrompt, copy } = props;
+  const note = latestPlan?.noteTasks.find((task) => task.id === selectedNoteId) ?? latestPlan?.noteTasks?.[0];
+
+  if (!selected) return <div className="panel"><EmptyState /></div>;
+
   return (
-    <form className="panel" onSubmit={generateReport}>
-      <h2 className="section-title">周报复盘</h2>
-      <div className="grid gap-3">
-        <Input name="weekLabel" label="周期" defaultValue={latestPlan?.weekStart || "本周"} />
-        <Textarea
-          name="rows"
-          label="发布笔记数据"
-          defaultValue="标题, 曝光, 点击, 点赞, 收藏, 评论, 私信, 转化"
-        />
-        <Textarea name="subjective" label="主观观察" placeholder="例如：封面更清晰的笔记评论更多，教程类收藏较高。" />
+    <div className="space-y-5">
+      <div className="panel">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="section-title">专家复盘</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-ink/60">
+              这里按“每条帖子”复盘。每发完一篇，就把数据、评论、专家改稿和你的观察放进来，生成诊断并沉淀规则。
+            </p>
+          </div>
+          <div className="rounded bg-teal/10 px-3 py-2 text-sm font-medium text-teal">
+            已沉淀 {selected.expertRules?.length || 0} 条候选规则
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded border border-ink/10 bg-white p-4">
+            <div className="font-semibold">1. 选帖子</div>
+            <p className="mt-1 text-sm leading-6 text-ink/60">从本周内容里选一条，也可以手动填写已发布标题。</p>
+          </div>
+          <div className="rounded border border-ink/10 bg-white p-4">
+            <div className="font-semibold">2. 看证据</div>
+            <p className="mt-1 text-sm leading-6 text-ink/60">输入曝光、点击、收藏、评论、私信、转化和真实反馈。</p>
+          </div>
+          <div className="rounded border border-ink/10 bg-white p-4">
+            <div className="font-semibold">3. 沉淀规则</div>
+            <p className="mt-1 text-sm leading-6 text-ink/60">把输出里的候选规则保存，后续生成内容会逐步吸收。</p>
+          </div>
+        </div>
       </div>
-      <button type="submit" className="primary-button mt-4">
-        <Send size={17} /> 生成并导出复盘建议
-      </button>
-    </form>
+
+      <div className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+        <form className="panel" onSubmit={generatePostReview}>
+          <div className="mb-4">
+            <h2 className="section-title">单篇帖子复盘</h2>
+            <p className="mt-1 text-sm text-ink/60">重点不是填完整表格，而是把这篇帖子的真实证据留下来。</p>
+          </div>
+
+          <div className="grid gap-3">
+            {latestPlan?.noteTasks?.length ? (
+              <label className="field">
+                <span>选择笔记</span>
+                <select name="noteTaskId" value={note?.id ?? ""} onChange={(event) => setSelectedNoteId(Number(event.target.value))}>
+                  {latestPlan.noteTasks.map((task) => (
+                    <option key={task.id} value={task.id}>{task.topicTitle}</option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <input type="hidden" name="noteTaskId" value="" readOnly />
+            )}
+            <Input name="postTitle" label="实际发布标题" defaultValue={note?.topicTitle || ""} placeholder="如果和计划标题不同，填最终发布标题" />
+            <div className="grid gap-3 md:grid-cols-2">
+              <Input name="postUrl" label="帖子链接（可选）" placeholder="粘贴小红书笔记 URL" />
+              <Input name="publishedAt" label="发布时间（可选）" defaultValue={note?.publishAt || ""} />
+            </div>
+            <Textarea
+              name="metrics"
+              label="发布表现数据"
+              placeholder={"曝光：\n点击：\n点赞：\n收藏：\n评论：\n私信：\n转化："}
+              help="没有完整后台数据也没关系，先填能看到的。"
+            />
+            <Textarea name="comments" label="评论区 / 私信 / 用户反馈" placeholder="粘贴典型评论、私信问题、客户反馈。" />
+            <details className="rounded border border-ink/10 bg-white p-3">
+              <summary className="cursor-pointer text-sm font-medium">补充专家改稿和实际内容（可选）</summary>
+              <div className="mt-3 grid gap-3">
+                <Textarea name="actualContent" label="实际发布正文 / 图片顺序" placeholder="粘贴最终正文、封面文字、图片顺序。" />
+                <Textarea name="expertFeedback" label="专家点评 / 客户反馈" placeholder="专家说哪里需要改、客户最终选择了什么。" />
+                <Textarea name="editComparison" label="修改前后对比" placeholder={"原始标题：...\n最终标题：...\n修改理由：..."} />
+                <Textarea name="subjective" label="你的观察" placeholder="例如：评论集中问价格；收藏高但私信少；封面像广告。" />
+              </div>
+            </details>
+            <Textarea
+              name="distillGoal"
+              label="希望沉淀成什么能力"
+              defaultValue="提炼这一篇对应的标题规则、封面规则、图片方案规则、正文规则、评论引导规则、风险规则和下次测试变量。"
+            />
+          </div>
+
+          <button type="submit" className="primary-button mt-4">
+            <Send size={17} /> 生成单帖复盘 Prompt
+          </button>
+        </form>
+
+        <div className="space-y-5">
+          <div className="panel">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="section-title">复盘 Prompt</h2>
+                <p className="mt-1 text-sm text-ink/60">复制给大模型或龙虾后，把输出中的候选规则粘到下方保存。</p>
+              </div>
+              <IconButton title="复制" onClick={() => copy(postReviewPrompt)} icon={<Clipboard size={17} />} />
+            </div>
+            {postReviewPrompt ? <MarkdownBox value={postReviewPrompt} /> : <EmptyState text="生成后这里会显示单帖复盘 Prompt。" />}
+          </div>
+
+          <form className="panel" onSubmit={saveExpertRules}>
+            <input type="hidden" name="source" value="post_review" readOnly />
+            <div className="mb-3">
+              <h2 className="section-title">保存候选规则</h2>
+              <p className="mt-1 text-sm text-ink/60">把复盘输出里的 JSON 规则数组粘贴进来，作为后续生成内容的经验库。</p>
+            </div>
+            <Textarea name="rulesJson" label="候选规则 JSON" placeholder={'[{"module":"title","rule":"...","confidence":0.5}]'} />
+            <button type="submit" className="secondary-button mt-4">
+              <Save size={17} /> 保存到规则库
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="mb-3">
+          <h2 className="section-title">最近经验</h2>
+          <p className="mt-1 text-sm text-ink/60">先展示候选规则，后续可以继续做审核、启用和注入生成链路。</p>
+        </div>
+        {selected.expertRules?.length ? (
+          <div className="grid gap-2 md:grid-cols-2">
+            {selected.expertRules.slice(0, 8).map((rule) => (
+              <div key={rule.id} className="rounded border border-ink/10 bg-white p-3">
+                <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-ink/50">
+                  <span>{rule.module}</span>
+                  <span>{rule.source || "manual"}</span>
+                  <span>置信度 {rule.confidence}</span>
+                </div>
+                <div className="text-sm leading-6">{rule.rule}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState text="还没有保存规则。先完成一篇单帖复盘。" />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function IndustryLearningPanel(props: {
+  selected?: Account;
+  draft: {
+    research?: IndustryKnowledgeResearch;
+    commands?: Array<{ category: string; command: string; description: string; safetyNote: string }>;
+    researchPrompt?: string;
+  };
+  prepareIndustryLearning: (event: React.FormEvent<HTMLFormElement>) => void;
+  saveIndustryLearning: (event: React.FormEvent<HTMLFormElement>) => void;
+  saveExpertRules: (event: React.FormEvent<HTMLFormElement>) => void;
+  copy: (text: string) => void;
+  loading: boolean;
+}) {
+  const { selected, draft, prepareIndustryLearning, saveIndustryLearning, saveExpertRules, copy, loading } = props;
+  const commands = draft.commands || safeParseCommands(draft.research?.commandJson || selected?.industryKnowledgeResearches?.[0]?.commandJson || "[]");
+  const researchPrompt = draft.researchPrompt || draft.research?.researchPrompt || selected?.industryKnowledgeResearches?.[0]?.researchPrompt || "";
+  const commandText = commands.map((item) => item.command).join("\n");
+
+  if (!selected) return <div className="panel"><EmptyState /></div>;
+
+  return (
+    <div className="space-y-5">
+      <div className="panel">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="section-title">行业学习</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-ink/60">
+              这里负责持续学习外部经验：全国同类型爆款、运营专家文章、案例拆解和评论痛点。学到的方法再沉淀进规则库。
+            </p>
+          </div>
+          <div className="rounded bg-teal/10 px-3 py-2 text-sm font-medium text-teal">
+            研究记录 {selected.industryKnowledgeResearches?.length || 0} 次
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded border border-ink/10 bg-white p-4">
+            <div className="font-semibold">1. 广泛搜索</div>
+            <p className="mt-1 text-sm leading-6 text-ink/60">全国/全网优先，不被本地内容限制风格。</p>
+          </div>
+          <div className="rounded border border-ink/10 bg-white p-4">
+            <div className="font-semibold">2. 提炼精髓</div>
+            <p className="mt-1 text-sm leading-6 text-ink/60">把标题、封面、图文结构、评论转化方法拆出来。</p>
+          </div>
+          <div className="rounded border border-ink/10 bg-white p-4">
+            <div className="font-semibold">3. 更新规则</div>
+            <p className="mt-1 text-sm leading-6 text-ink/60">只保存可验证、可复用、能适配当前账号的方法。</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+        <div className="space-y-5">
+          <form className="panel" onSubmit={prepareIndustryLearning}>
+            <div className="mb-4">
+              <h2 className="section-title">生成学习任务</h2>
+              <p className="mt-1 text-sm text-ink/60">默认会要求全国/全网优先，本地只做补充对照。</p>
+            </div>
+            <div className="grid gap-3">
+              <Textarea
+                name="topic"
+                label="学习主题"
+                defaultValue="小红书图文爆款方法、标题封面、图片真实感、评论转化和复盘方法"
+              />
+              <Input name="searchScope" label="搜索范围" defaultValue="全国 / 全网优先，本地只作为补充" />
+            </div>
+            <button type="submit" disabled={loading} className="primary-button mt-4">
+              <Search size={17} /> 生成行业学习任务
+            </button>
+          </form>
+
+          <div className="panel">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="section-title">搜索命令</h2>
+                <p className="mt-1 text-sm text-ink/60">先执行只读搜索，再把结果粘回右侧。</p>
+              </div>
+              <IconButton title="复制命令" onClick={() => copy(commandText)} icon={<Clipboard size={17} />} />
+            </div>
+            {commandText ? <MarkdownBox value={commandText} /> : <EmptyState text="生成任务后这里会显示搜索命令。" />}
+          </div>
+
+          <div className="panel">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="section-title">研究 Prompt</h2>
+                <p className="mt-1 text-sm text-ink/60">用于让大模型从搜索材料中提炼方法和候选规则。</p>
+              </div>
+              <IconButton title="复制 Prompt" onClick={() => copy(researchPrompt)} icon={<FileText size={17} />} />
+            </div>
+            {researchPrompt ? <MarkdownBox value={researchPrompt} /> : <EmptyState text="生成任务后这里会显示研究 Prompt。" />}
+          </div>
+        </div>
+
+        <div className="space-y-5">
+          <form className="panel" onSubmit={saveIndustryLearning}>
+            <div className="mb-4">
+              <h2 className="section-title">保存学习材料</h2>
+              <p className="mt-1 text-sm text-ink/60">粘贴搜索结果、文章摘录或大模型总结，作为之后复盘和规则更新的依据。</p>
+            </div>
+            <input type="hidden" name="topic" value={draft.research?.topic || selected.industryKnowledgeResearches?.[0]?.topic || ""} readOnly />
+            <input type="hidden" name="searchScope" value={draft.research?.searchScope || selected.industryKnowledgeResearches?.[0]?.searchScope || ""} readOnly />
+            <Textarea name="rawResults" label="搜索结果 / 文章摘录" placeholder="粘贴小红书搜索结果、文章链接、专家观点摘录、案例拆解。" />
+            <Textarea name="summaryMarkdown" label="学习总结（可选）" placeholder="粘贴大模型整理后的方法论和规则候选。" />
+            <button type="submit" className="secondary-button mt-4">
+              <Save size={17} /> 保存学习材料
+            </button>
+          </form>
+
+          <form className="panel" onSubmit={saveExpertRules}>
+            <input type="hidden" name="source" value="industry_learning" readOnly />
+            <div className="mb-3">
+              <h2 className="section-title">沉淀为专家规则</h2>
+              <p className="mt-1 text-sm text-ink/60">把行业学习输出里的 JSON 规则数组粘贴进来。</p>
+            </div>
+            <Textarea name="rulesJson" label="候选规则 JSON" placeholder={'[{"module":"cover","rule":"...","source":"expert_article","confidence":0.6}]'} />
+            <button type="submit" className="primary-button mt-4">
+              <Sparkles size={17} /> 保存到规则库
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2996,6 +3781,34 @@ ${plan.noteTasks
 }
 
 function weeklyPresets(accountType: string) {
+  if (accountType === "wedding_planning") {
+    return [
+      {
+        name: "婚礼细节拆解",
+        help: "适合婚礼账号冷启动：先从真实图片里拆出新人最想收藏的细节。",
+        theme: "婚礼细节拆解和备婚收藏周",
+        goal: "提升收藏和评论咨询，让备婚用户明确哪些细节值得参考、适合什么预算和场地",
+        frequency: 4,
+        ratio: "细节拆解2 / 真实案例1 / 备婚问答1",
+        testHypothesis: "真实婚礼细节图 + 风格/预算/适合人群信息卡，比泛泛案例展示更容易被备婚用户收藏。",
+        commercializationMove: "轻量提示婚礼策划咨询、档期、套餐和到店沟通，价格和档期必须人工确认。",
+        interactionGoal: "引导用户留言城市、婚期、预算、场地类型和喜欢的婚礼风格。",
+        availableAssets: "婚礼蛋糕、甜品台、花艺、仪式区、迎宾牌、桌花、席位卡、灯光布幔、纸品和场地动线等真实婚礼现场图。"
+      },
+      {
+        name: "真实案例转化",
+        help: "适合已有真实婚礼案例的策划公司：用授权案例建立信任。",
+        theme: "真实婚礼案例和咨询转化周",
+        goal: "展示真实案例的审美、流程和落地能力，沉淀有效咨询",
+        frequency: 4,
+        ratio: "真实案例2 / 风格拆解1 / 预算避坑1",
+        testHypothesis: "授权案例 + 细节拆解 + 待确认边界，会比单纯晒图更容易带来高质量咨询。",
+        commercializationMove: "自然提到档期咨询、方案沟通、套餐边界和到店预约，不虚构价格和成交。",
+        interactionGoal: "引导用户留言婚期、城市、预算、场地、桌数和喜欢的参考风格。",
+        availableAssets: "授权婚礼案例图、现场布置图、仪式区、迎宾区、桌面细节、花艺、灯光和流程花絮。"
+      }
+    ];
+  }
   const mode = accountUiMode(accountType);
   const presets = {
     culture_tourism: [

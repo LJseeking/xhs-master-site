@@ -6,8 +6,10 @@ function q(value: string) {
 
 export function buildReferenceResearchKeywords(account: Account, template: AccountTypeTemplate) {
   const pieces = [
+    "全国",
+    "爆款",
+    "高互动",
     template.name,
-    account.city,
     account.targetUsers,
     account.contentDirections,
     account.painPoints
@@ -15,40 +17,20 @@ export function buildReferenceResearchKeywords(account: Account, template: Accou
     .flatMap((item) => item.split(/[，,、\n/]/))
     .map((item) => item.trim())
     .filter(Boolean);
-  return Array.from(new Set(pieces)).slice(0, 8).join(" ");
+  return Array.from(new Set(pieces)).slice(0, 12).join(" ");
 }
 
 export function buildReferenceResearchCommands(account: Account, template: AccountTypeTemplate) {
   const base = "uv run xiaohongshu_auto_op";
   const accountFlag = `--account ${q(account.accountParam)}`;
   const keyword = buildReferenceResearchKeywords(account, template);
-  const cityKeyword = [account.city, template.name].filter(Boolean).join(" ");
-  const painKeyword = [account.painPoints.split(/[，,、\n]/).find(Boolean), template.name].filter(Boolean).join(" ");
 
   return [
     {
-      category: "同类型账号搜索",
-      command: `${base} xhs-explore search --keyword ${q(keyword)} ${accountFlag} --limit 30`,
-      description: "搜索同类型账号和爆款笔记，优先找稳定更新、互动质量高的参考对象。",
+      category: "爆款研究",
+      command: `${base} xhs-explore search --keyword ${q(keyword)} ${accountFlag} --limit 40 --include-notes --include-comments`,
+      description: "一次性只读搜索全国同类型账号、高互动爆款笔记和评论痛点；本地内容只作为补充对照。",
       safetyNote: "只读探索命令，不发布、不互动。"
-    },
-    {
-      category: "城市/场景搜索",
-      command: `${base} xhs-explore search --keyword ${q(cityKeyword || keyword)} ${accountFlag} --limit 20`,
-      description: "如果账号有城市或明确场景，用本地化关键词找到更贴近的参考账号。",
-      safetyNote: "只读探索命令，不发布、不互动。"
-    },
-    {
-      category: "痛点关键词搜索",
-      command: `${base} xhs-explore search --keyword ${q(painKeyword || keyword)} ${accountFlag} --limit 20 --include-comments`,
-      description: "从笔记和评论中提取目标用户真实问题与内容切口。",
-      safetyNote: "只读探索命令，不发布、不互动。"
-    },
-    {
-      category: "参考主页分析",
-      command: `${base} xhs-explore user-profile --user-url ${q("粘贴参考账号主页 URL")} ${accountFlag} --include-notes --limit 20`,
-      description: "对候选参考账号主页做内容栏目、标题、封面、互动方式分析。",
-      safetyNote: "只读探索命令，不关注、不私信。"
     }
   ];
 }
@@ -63,7 +45,9 @@ export function buildReferenceResearchPrompt(account: Account, template: Account
 --account ${account.accountParam}
 
 ## 研究目标
-在小红书中搜索「${template.name}」同类型账号，筛选 5-10 个值得参考的账号，并总结它们的内容特色。研究结果将用于生成账号「${account.name}」的人设文件和策划案。
+在小红书中优先搜索全国范围内「${template.name}」同类型账号和高互动爆款内容，筛选 5-10 个值得参考的账号/笔记，并总结它们的内容特色。研究结果将用于生成账号「${account.name}」的人设文件和策划案。
+
+重要原则：同行爆款分析一定不能局限在账号所在城市。必须先看全国同类型热门内容，充分吸收全国成熟账号的标题、封面、图集、评论痛点和转化方式；本地内容只能作为落地差异和用户语境的补充对照，不能作为主要风格样本。
 
 ## 我方账号基础信息
 - 账号名称：${account.name}
@@ -78,9 +62,9 @@ export function buildReferenceResearchPrompt(account: Account, template: Account
 - 禁忌事项：${account.taboos || "遵守平台规则，不伪造体验"}
 
 ## 搜索建议
-- 同类型关键词：${buildReferenceResearchKeywords(account, template)}
-- 城市/场景关键词：${[account.city, template.name].filter(Boolean).join(" ") || template.name}
-- 痛点关键词：${[account.painPoints.split(/[，,、\n]/).find(Boolean), template.name].filter(Boolean).join(" ") || template.name}
+- 全国同类型爆款关键词：${buildReferenceResearchKeywords(account, template)}
+- 全国痛点爆款关键词：${[account.painPoints.split(/[，,、\n]/).find(Boolean), template.name, "全国", "爆款", "高互动"].filter(Boolean).join(" ") || template.name}
+- 本地对照关键词（仅补充）：${[account.city, template.name].filter(Boolean).join(" ") || "未设置城市，可跳过"}
 
 ## 请返回
 1. 候选参考账号列表：账号名、主页 URL、粉丝量/互动情况、适合参考的原因
@@ -93,6 +77,7 @@ export function buildReferenceResearchPrompt(account: Account, template: Account
 8. 我方账号可以借鉴的部分
 9. 我方账号必须避免同质化的部分
 10. 对人设、栏目、标题、封面、商业化路径的建议
+11. 全国爆款可借鉴规律 vs 本地落地差异：明确哪些结论来自全国高互动样本，哪些只是本地对照，不要让本地样本限制整体风格。
 
 ## 约束
 - 不要编造搜索不到的数据。

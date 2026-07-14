@@ -6,10 +6,11 @@ export function buildTaskPrompt(input: {
   strategy: AccountStrategy | null;
   weeklyPlan: WeeklyPlan;
   noteTask: NoteTask;
+  expertRules?: string;
 }) {
-  const { account, strategy, weeklyPlan, noteTask } = input;
+  const { account, strategy, weeklyPlan, noteTask, expertRules } = input;
   const strategySummary = strategy?.positioning ?? `${account.name} ${account.accountType} 账号`;
-  return buildModeTaskPrompt({ account, strategySummary, weeklyPlan, noteTask });
+  return buildModeTaskPrompt({ account, strategySummary, weeklyPlan, noteTask, expertRules });
 }
 
 function baseContext(input: {
@@ -18,8 +19,9 @@ function baseContext(input: {
   weeklyPlan: WeeklyPlan;
   noteTask: NoteTask;
   imagePanelName: string;
+  expertRules?: string;
 }) {
-  const { account, strategySummary, weeklyPlan, noteTask, imagePanelName } = input;
+  const { account, strategySummary, weeklyPlan, noteTask, imagePanelName, expertRules } = input;
   return `## 模式
 只生成草稿，不真实发布，不真实互动。真实账号操作只输出参数建议，必须人工确认。
 
@@ -40,7 +42,10 @@ function baseContext(input: {
 - 痛点：${noteTask.painPoint}
 - 核心观点：${noteTask.coreView}
 - 评论钩子：${noteTask.commentHook}
-- 禁忌：${weeklyPlan.taboos || account.taboos || "遵守 AGENTS.md 禁区"}`;
+- 禁忌：${weeklyPlan.taboos || account.taboos || "遵守 AGENTS.md 禁区"}
+
+## 已沉淀专家规则
+${expertRules || "暂无已保存规则；按账号策划案和本篇任务生成。"}`;
 }
 
 const promptModeCopy: Record<AccountVisualMode, {
@@ -147,6 +152,7 @@ function buildModeTaskPrompt(input: {
   strategySummary: string;
   weeklyPlan: WeeklyPlan;
   noteTask: NoteTask;
+  expertRules?: string;
 }) {
   const mode = accountVisualMode(input.account.accountType);
   const copy = promptModeCopy[mode];

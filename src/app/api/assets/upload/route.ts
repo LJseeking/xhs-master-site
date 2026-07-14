@@ -60,7 +60,7 @@ export async function POST(request: Request) {
         riskNotes: String(form.get("riskNotes") || "")
       }
     });
-    assets.push(asset);
+    assets.push({ ...asset, localFilePath: absolutePath });
   }
 
   return NextResponse.json({ count: assets.length, assets });

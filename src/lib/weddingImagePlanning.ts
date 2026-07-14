@@ -59,15 +59,17 @@ export function buildWeddingImagePlanPrompt(account: WeddingPlanAccount, options
   const targetCount = weeks === 2 ? "10-14 篇" : "5-7 篇";
   const assetsDir = compact(options.openclawAssetsDir || account.assetsPath, "请填写龙虾可访问的婚礼图片文件夹");
   const specifiedImages = compact(options.openclawImagePaths, "未指定，默认扫描素材文件夹内全部图片，优先处理约 30 张婚礼现场图。");
-  const planningGoal = compact(options.planningGoal, "优先从真实婚礼图片里找高收藏细节，形成可执行的小红书选题规划。");
+  const planningGoal = compact(options.planningGoal, "优先从真实婚礼图片里找高收藏细节，直接形成可执行的小红书批量帖子方案。");
 
-  return `# 给龙虾 skill 的婚礼批量图片选题规划 Prompt
+  return `# 给龙虾 skill 的婚礼批量帖子生成 Prompt
 
 ## 当前执行模式
 只读研究 + 本地图片分析 + 生成方案。不得发布、评论、点赞、收藏、关注或私信。
 
 ## 任务目标
-客户会提供约 30 张真实婚礼现场图片。请你先读取这些图片，识别图片中的优秀细节；再只读研究小红书同类型婚礼公司、婚礼策划、婚礼布置、备婚灵感类爆款笔记；最后把“真实图片特点”和“同行爆款表达方式”合并，输出 ${weeks} 周小红书笔记规划（${targetCount}）。
+客户会提供约 30 张真实婚礼现场图片。请你先读取这些图片，识别图片中的优秀细节；再只读研究小红书全国范围内同类型婚礼公司、婚礼策划、婚礼布置、备婚灵感类爆款笔记；最后把“真实图片特点”和“全国同行爆款表达方式”合并，直接输出 ${weeks} 周小红书批量帖子方案（${targetCount}）。
+
+重要原则：同行爆款内容分析不能局限在账号当地。必须优先搜索全国同类型热门内容，充分学习成熟账号的标题节奏、封面文字、图集顺序、细节命名、情绪表达和评论痛点；本地城市内容只作为落地差异、价格语境、用户咨询习惯的补充对照，不能限制整体风格。
 
 ## 账号信息
 - 账号名称：${account.name}
@@ -108,11 +110,12 @@ ${latestStyleBrief(account)}
 6. 风险：新人或宾客肖像、场地/品牌露出、合同价格、手机号、未授权内容、AI 痕迹、画质不足。
 
 ## 第二步：只读研究小红书同行热门笔记
-请搜索并总结同类型热门笔记，不要照搬文字。建议关键词：
-- 婚礼策划 婚礼布置 爆款
-- 备婚灵感 婚礼蛋糕 花艺 仪式区
-- 迎宾区 甜品台 桌花 席位卡 婚礼细节
-- ${account.city || ""} 婚礼策划 婚礼布置
+请优先搜索并总结全国同类型热门笔记，不要照搬文字。建议关键词：
+- 全国 婚礼策划 婚礼布置 爆款
+- 备婚灵感 婚礼蛋糕 花艺 仪式区 高收藏
+- 迎宾区 甜品台 桌花 席位卡 婚礼细节 爆款
+- 婚礼公司 真实案例 备婚攻略 高互动
+- ${account.city || ""} 婚礼策划 婚礼布置（仅作为本地对照，不作为主要风格样本）
 
 请重点总结：
 1. 标题节奏：细节名、风格词、情绪表达、收藏理由如何组合。
@@ -122,25 +125,25 @@ ${latestStyleBrief(account)}
 5. 评论区痛点：预算、场地适配、风格沟通、花材、档期、落地效果、是否适合自己的婚礼。
 6. 不可借鉴内容：盗图感、伪造案例、夸大效果、虚构价格档期、直接复制标题和正文。
 
-## 第三步：输出 ${weeks} 周笔记规划
-请输出 ${targetCount} 个选题。每个选题必须绑定真实图片，不能只写泛泛婚礼服务。
+## 第三步：输出 ${weeks} 周批量帖子方案
+请输出 ${targetCount} 篇帖子方案。每篇帖子必须绑定真实图片，不能只写泛泛婚礼服务。
 
-每个选题按以下字段输出：
+每篇帖子按以下字段输出：
 - 发布日：第几周 / 星期几。
-- 选题标题方向：给 3 个小红书标题候选，学习爆款标题节奏但不得照搬。
+- 标题：给 3 个小红书标题候选，学习爆款标题节奏但不得照搬。
 - 主轴细节：只聚焦一个细节，例如婚礼蛋糕、白绿花艺、仪式区拱门、迎宾牌、桌花、席位卡。
 - 绑定图片：列出 3-6 张建议使用的文件名或路径，并说明图 1 到图 6 的顺序。
 - 图片判断理由：这组图里最值得写的细节优秀在哪里。
 - 图集结构：封面、细节拆解、关系图、信息卡、FAQ/咨询引导分别放什么。
-- 正文结构：开头钩子、细节拆解、备婚价值、适合人群、咨询/收藏引导。
+- 正文草稿：直接写出 300-600 字小红书正文，包含开头钩子、细节拆解、备婚价值、适合人群、咨询/收藏引导。
 - 参考同行风格：只写可学习的表达方式，例如“标题用细节名 + 情绪 + 收藏理由”，不要引用原句。
 - 图上文字：每张图建议叠加的短字。
 - 互动问题：引导用户评论预算、风格、场地、喜欢的细节或备婚困惑。
 - 需要人工核验：价格、档期、场地、套餐、花材、肖像授权、案例授权。
 - 缺口清单：如果图片不足，需要补拍哪些画面。
 
-## 第四步：给后续执行的单篇 Prompt
-在规划末尾，请挑出优先级最高的 3 篇，分别给出可以继续生成“单篇图片方案”和“正文草稿”的简短 Prompt。每条 Prompt 必须包含：选题标题、绑定图片、主轴细节、参考爆款风格、正文重点和风险边界。
+## 第四步：给后续精修提示
+在方案末尾，请挑出优先级最高的 3 篇，分别给出可以继续进入“单篇精修模式”的简短 Prompt。每条 Prompt 必须包含：标题、绑定图片、主轴细节、参考爆款风格、正文重点和风险边界。
 
 ## 安全边界
 - 不得伪造真实新人案例、宾客反馈、婚礼落地效果、价格、档期、场地、套餐和花材成本。
@@ -154,38 +157,13 @@ export function buildWeddingImagePlanCommands(account: WeddingPlanAccount, optio
   const base = "uv run xiaohongshu_auto_op";
   const accountFlag = `--account ${q(account.accountParam)}`;
   const assetsDir = options.openclawAssetsDir || account.assetsPath || "填写龙虾可访问的婚礼图片文件夹";
-  const keyword = [
-    account.city,
-    "婚礼策划",
-    "婚礼布置",
-    "备婚灵感",
-    "婚礼蛋糕",
-    "花艺",
-    "仪式区",
-    "迎宾区",
-    "小红书 爆款"
-  ]
-    .filter(Boolean)
-    .join(" ");
 
   return [
     {
-      category: "研究同行热门婚礼笔记",
-      command: `${base} xhs-explore search --keyword ${q(keyword)} ${accountFlag} --limit 40 --include-notes --include-comments`,
-      description: "只读搜索婚礼策划、备婚灵感、婚礼细节类热门笔记，提炼标题节奏、封面形式、图集结构和评论痛点。",
-      safetyNote: "只读搜索命令，不发布、不互动，不复制同行原文。"
-    },
-    {
-      category: "批量分析婚礼现场图片并生成规划",
+      category: "批量分析婚礼现场图片并生成帖子",
       command: `${base} xhs-content-ops draft-note --prompt-file ${q(options.promptFile)} --assets-dir ${q(assetsDir)} ${accountFlag} --safe-mode`,
-      description: `读取约 30 张婚礼现场图，识别蛋糕、花艺、仪式区、迎宾区、桌花、席位卡等细节，并输出 ${options.weeks === 2 ? "两周" : "一周"}笔记规划。`,
+      description: `读取约 30 张婚礼现场图，先识别蛋糕、花艺、仪式区、迎宾区、桌花、席位卡等细节，再结合全国同行爆款研究，输出 ${options.weeks === 2 ? "两周" : "一周"}批量帖子方案。`,
       safetyNote: "只生成规划和草稿建议；新人肖像、场地、价格、档期、套餐和授权必须人工核验。"
-    },
-    {
-      category: "按规划继续生成单篇图片方案",
-      command: `${base} xhs-creative image2 --prompt-file ${q(options.promptFile)} --assets-dir ${q(assetsDir)} --output-dir ${q(account.assetsPath)} ${accountFlag}`,
-      description: "从规划中选定一篇后，再基于绑定图片生成封面、细节拆解图、信息卡和图集顺序。",
-      safetyNote: "AI 改图只做轻处理和信息卡，不改变真实婚礼事实。"
     }
   ];
 }
