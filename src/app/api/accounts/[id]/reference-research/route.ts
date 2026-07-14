@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { buildAccountStrategy } from "@/lib/strategy";
 import { getLlmStatus, regenerateStrategyFromReferenceResearchWithLlm, summarizeReferenceResearchWithLlm } from "@/lib/llm";
+import { normalizeAccountTypeKey } from "@/data/accountTypeTemplates";
 import {
   buildReferenceResearchCommands,
   buildReferenceResearchKeywords,
@@ -16,7 +17,7 @@ export async function POST(request: Request, context: { params: { id: string } }
   const account = await prisma.account.findUnique({ where: { id: accountId } });
   if (!account) return NextResponse.json({ error: "账号不存在" }, { status: 404 });
 
-  const template = await prisma.accountTypeTemplate.findUnique({ where: { typeKey: account.accountType } });
+  const template = await prisma.accountTypeTemplate.findUnique({ where: { typeKey: normalizeAccountTypeKey(account.accountType) } });
   if (!template) return NextResponse.json({ error: "账号类型模板不存在" }, { status: 404 });
 
   if (action === "prepare") {

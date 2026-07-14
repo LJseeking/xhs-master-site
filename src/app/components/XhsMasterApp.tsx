@@ -252,7 +252,7 @@ const sourceTypes = [
 const authStates = ["待确认", "已授权", "可商用", "仅内部参考", "禁止发布"];
 
 function accountUiMode(accountType?: string) {
-  if (["hiking_diary", "mountain_route", "city_walk_nature", "overseas_hiking"].includes(accountType || "")) return "outdoor";
+  if (["hiking_diary", "outdoor_travel", "mountain_route", "city_walk_nature", "overseas_hiking"].includes(accountType || "")) return "outdoor";
   if (["restaurant", "cafe_bakery", "hotpot_bbq_latenight", "bar_lightmeal"].includes(accountType || "")) return "food";
   if (accountType === "folk_custom_heritage") return "heritage";
   if (accountType === "homestay_hotel_camp") return "stay";

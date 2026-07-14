@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { ensureAccountDirs } from "@/lib/fsPaths";
 import { buildAccountStrategy } from "@/lib/strategy";
 import { generateStrategyWithLlm } from "@/lib/llm";
-import { accountTypeTemplates } from "@/data/accountTypeTemplates";
+import { accountTypeTemplates, normalizeAccountTypeKey } from "@/data/accountTypeTemplates";
 
 const accountSchema = z.object({
   name: z.string().min(1),
@@ -53,7 +53,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const body = accountSchema.parse(await request.json());
   const dirs = await ensureAccountDirs(body.name);
-  const template = await prisma.accountTypeTemplate.findUnique({ where: { typeKey: body.accountType } });
+  const template = await prisma.accountTypeTemplate.findUnique({ where: { typeKey: normalizeAccountTypeKey(body.accountType) } });
 
   if (!template) {
     return NextResponse.json({ error: "未知账号类型，请先运行 npm run db:init 初始化模板。" }, { status: 400 });

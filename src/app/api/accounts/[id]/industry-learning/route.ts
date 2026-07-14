@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { normalizeAccountTypeKey } from "@/data/accountTypeTemplates";
 import {
   buildIndustryLearningCommands,
   buildIndustryLearningPrompt
@@ -12,7 +13,7 @@ export async function POST(request: Request, context: { params: { id: string } }
   const account = await prisma.account.findUnique({ where: { id: accountId } });
   if (!account) return NextResponse.json({ error: "账号不存在" }, { status: 404 });
 
-  const template = await prisma.accountTypeTemplate.findUnique({ where: { typeKey: account.accountType } });
+  const template = await prisma.accountTypeTemplate.findUnique({ where: { typeKey: normalizeAccountTypeKey(account.accountType) } });
   const topic = String(body.topic || "小红书图文爆款方法、标题封面、图片真实感、评论转化和复盘方法");
   const searchScope = String(body.searchScope || "全国 / 全网优先，本地只作为补充");
 

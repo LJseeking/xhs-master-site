@@ -231,5 +231,18 @@ export const accountTypeTemplates: AccountTypeTemplateSeed[] = [
 ];
 
 export function getTemplateByKey(typeKey: string) {
-  return accountTypeTemplates.find((item) => item.typeKey === typeKey) ?? accountTypeTemplates[0];
+  return accountTypeTemplates.find((item) => item.typeKey === normalizeAccountTypeKey(typeKey)) ?? accountTypeTemplates[0];
+}
+
+export function normalizeAccountTypeKey(typeKey: string) {
+  const aliases: Record<string, string> = {
+    outdoor_travel: "hiking_diary",
+    culture_tourism: "cultural_tourism_destination",
+    heritage: "folk_custom_heritage",
+    stay: "homestay_hotel_camp",
+    museum: "museum_exhibition_study",
+    product: "regional_product_cultural_creative",
+    service: "local_life_service"
+  };
+  return aliases[typeKey] || typeKey;
 }
