@@ -1,0 +1,14 @@
+.git
+.gitignore
+.idea
+.next
+dist
+node_modules
+output
+local-data
+assets
+profiles
+prompts
+prisma/dev.db
+prisma/dev.db-journal
+*.log

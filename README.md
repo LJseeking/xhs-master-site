@@ -53,6 +53,32 @@ npm run db:init
 npm run dev -- --port 3000
 ```
 
+后端环境切换：
+
+- 本地：`npm run env:local`
+- 测试：`npm run env:test`
+- 正式：`npm run env:prod`
+- 构建对应环境：
+  `npm run build:local`
+  `npm run build:test`
+  `npm run build:prod`
+- 静态站点构建对应环境：
+  `npm run build:sites:local`
+  `npm run build:sites:test`
+  `npm run build:sites:prod`
+- 开发对应环境：
+  `npm run dev:local`
+  `npm run dev:test`
+  `npm run dev:prod`
+
+默认映射：
+
+- `local` → `http://localhost:13010`
+- `test` → `http://xhsapitest.powermatrix.tech`
+- `prod` → `https://xhsapi.powermatrix.tech`
+
+环境切换脚本会写入 `.env.local`，代码会自动补全 `/client`，不用手动再写 `/client`。
+
 打开：
 
 ```text

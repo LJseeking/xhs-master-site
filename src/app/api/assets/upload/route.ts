@@ -1,11 +1,9 @@
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getBackendApiBaseUrl } from "@/lib/backendApi";
 
-const RAW_API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:13010";
-const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, "").endsWith("/client")
-  ? RAW_API_BASE_URL.replace(/\/+$/, "")
-  : `${RAW_API_BASE_URL.replace(/\/+$/, "")}/client`;
+const API_BASE_URL = getBackendApiBaseUrl();
 
 type BackendResponse<T> = {
   status: boolean;

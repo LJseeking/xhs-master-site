@@ -1,12 +1,10 @@
 /**
  * 后端 API 客户端工具
- * 对接 xhs_server Go 后端 (默认 http://localhost:13010/client)
+ * 默认测试服: http://xhsapitest.powermatrix.tech/client
  */
+import { getBackendApiBaseUrl } from "@/lib/backendApi";
 
-const RAW_API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:13010";
-const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, "").endsWith("/client")
-  ? RAW_API_BASE_URL.replace(/\/+$/, "")
-  : `${RAW_API_BASE_URL.replace(/\/+$/, "")}/client`;
+const API_BASE_URL = getBackendApiBaseUrl();
 
 /* ---------- 类型定义 ---------- */
 
