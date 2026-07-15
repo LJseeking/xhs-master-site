@@ -32,6 +32,7 @@ mkdir -p "${project_dir}/output/node_modules/@prisma"
 
 cd "$project_dir" || exit 1
 node scripts/switch-env.js "$environment"
+export DATABASE_URL="file:../local-data/xhs-master.db"
 
 if [ -f package-lock.json ] && [ ! -d node_modules ]; then
   npm ci
