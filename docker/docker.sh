@@ -39,7 +39,7 @@ else
   npm install
 fi
 
-npm run prisma:generate
+npm run db:init
 npm run "build:${environment}"
 
 # 复制编译产物和运行时所需的文件到 output

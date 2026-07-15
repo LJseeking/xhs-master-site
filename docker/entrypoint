@@ -4,7 +4,7 @@ set -eu
 mkdir -p /app/assets /app/profiles /app/prompts /app/local-data /app/prisma
 
 if [ -z "${DATABASE_URL:-}" ]; then
-  export DATABASE_URL="file:/app/prisma/dev.db"
+  export DATABASE_URL="file:/app/local-data/xhs-master.db"
 fi
 
 exec node server.js
