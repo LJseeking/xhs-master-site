@@ -33,7 +33,7 @@ mkdir -p "${project_dir}/output/node_modules/@prisma"
 cd "$project_dir" || exit 1
 node scripts/switch-env.js "$environment"
 
-if [ -f package-lock.json ]; then
+if [ -f package-lock.json ] && [ ! -d node_modules ]; then
   npm ci
 else
   npm install
