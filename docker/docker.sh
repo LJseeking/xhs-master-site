@@ -2,35 +2,56 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
+project_dir="/home/code/xhs-master-site"
 
-cd "$script_dir" ||  exit 1
+cd "$script_dir" || exit 1
 
-environment=$1
+environment="${1:-}"
 
-rm -rf /home/code/xhs-master-site/output
-mkdir -p /home/code/xhs-master-site/output/
-mkdir -p /home/code/xhs-master-site/output/.next
-mkdir -p /home/code/xhs-master-site/output/.next/standalone
-mkdir -p /home/code/xhs-master-site/output/.next/static
-mkdir -p /home/code/xhs-master-site/output/public
-mkdir -p /home/code/xhs-master-site/output/prisma
-mkdir -p /home/code/xhs-master-site/output/assets
-mkdir -p /home/code/xhs-master-site/output/profiles
-mkdir -p /home/code/xhs-master-site/output/prompts
-mkdir -p /home/code/xhs-master-site/output/local-data
+case "$environment" in
+  local|test|prod)
+    ;;
+  *)
+    echo "Unsupported environment: ${environment:-<empty>}"
+    echo "Supported: local, test, prod"
+    exit 1
+    ;;
+esac
 
-cd /home/code/xhs-master-site || exit 1
-node scripts/switch-env.js $environment
-npm install
-npm run build
+rm -rf "${project_dir}/output"
+mkdir -p "${project_dir}/output/.next/standalone"
+mkdir -p "${project_dir}/output/.next/static"
+mkdir -p "${project_dir}/output/public"
+mkdir -p "${project_dir}/output/prisma"
+mkdir -p "${project_dir}/output/assets"
+mkdir -p "${project_dir}/output/profiles"
+mkdir -p "${project_dir}/output/prompts"
+mkdir -p "${project_dir}/output/local-data"
+mkdir -p "${project_dir}/output/node_modules/.prisma"
+mkdir -p "${project_dir}/output/node_modules/@prisma"
+
+cd "$project_dir" || exit 1
+node scripts/switch-env.js "$environment"
+
+if [ -f package-lock.json ]; then
+  npm ci
+else
+  npm install
+fi
+
+npm run prisma:generate
+npm run "build:${environment}"
 
 # 复制编译产物和运行时所需的文件到 output
-cp -r /home/code/xhs-master-site/.next/standalone/. /home/code/xhs-master-site/output/.next/standalone
-cp -r /home/code/xhs-master-site/.next/static/. /home/code/xhs-master-site/output/.next/static
-cp -r /home/code/xhs-master-site/prisma/. /home/code/xhs-master-site/output/prisma
-[ -d /home/code/xhs-master-site/assets ] && cp -r /home/code/xhs-master-site/assets/. /home/code/xhs-master-site/output/assets
-[ -d /home/code/xhs-master-site/profiles ] && cp -r /home/code/xhs-master-site/profiles/. /home/code/xhs-master-site/output/profiles
-[ -d /home/code/xhs-master-site/prompts ] && cp -r /home/code/xhs-master-site/prompts/. /home/code/xhs-master-site/output/prompts
-[ -d /home/code/xhs-master-site/local-data ] && cp -r /home/code/xhs-master-site/local-data/. /home/code/xhs-master-site/output/local-data
-cp /home/code/xhs-master-site/docker/entrypoint /home/code/xhs-master-site/output/entrypoint
-cp /home/code/xhs-master-site/docker/Dockerfile /home/code/xhs-master-site/output/Dockerfile
+cp -r "${project_dir}/.next/standalone/." "${project_dir}/output/.next/standalone"
+cp -r "${project_dir}/.next/static/." "${project_dir}/output/.next/static"
+cp -r "${project_dir}/prisma/." "${project_dir}/output/prisma"
+[ -d "${project_dir}/public" ] && cp -r "${project_dir}/public/." "${project_dir}/output/public"
+[ -d "${project_dir}/assets" ] && cp -r "${project_dir}/assets/." "${project_dir}/output/assets"
+[ -d "${project_dir}/profiles" ] && cp -r "${project_dir}/profiles/." "${project_dir}/output/profiles"
+[ -d "${project_dir}/prompts" ] && cp -r "${project_dir}/prompts/." "${project_dir}/output/prompts"
+[ -d "${project_dir}/local-data" ] && cp -r "${project_dir}/local-data/." "${project_dir}/output/local-data"
+[ -d "${project_dir}/node_modules/.prisma" ] && cp -r "${project_dir}/node_modules/.prisma/." "${project_dir}/output/node_modules/.prisma"
+[ -d "${project_dir}/node_modules/@prisma" ] && cp -r "${project_dir}/node_modules/@prisma/." "${project_dir}/output/node_modules/@prisma"
+cp "${project_dir}/docker/entrypoint" "${project_dir}/output/entrypoint"
+cp "${project_dir}/docker/Dockerfile" "${project_dir}/output/Dockerfile"
