@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:20-slim
 
 WORKDIR /app
 
@@ -6,7 +6,7 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
-RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
+RUN groupadd --system nodejs && useradd --system --gid nodejs nextjs
 
 COPY --chown=nextjs:nodejs ./.next/standalone ./
 COPY --chown=nextjs:nodejs ./.next/static ./.next/static
