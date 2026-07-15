@@ -1,10 +1,14 @@
-FROM node:20-slim
+FROM node:20-bullseye-slim
 
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system nodejs && useradd --system --gid nodejs nextjs
 
