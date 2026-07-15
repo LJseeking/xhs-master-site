@@ -1,9 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 const root = process.cwd();
-const dbPath = path.join(root, "prisma", "dev.db");
+const envFile = path.join(root, ".env");
+const envContent = existsSync(envFile) ? readFileSync(envFile, "utf8") : "";
+const databaseUrl = envContent.match(/^DATABASE_URL="([^"]+)"/m)?.[1] || "file:./dev.db";
+const sqliteRelativePath = databaseUrl.startsWith("file:") ? databaseUrl.slice("file:".length) : "./dev.db";
+const dbPath = path.resolve(path.join(root, "prisma"), sqliteRelativePath);
 const migrationDir = path.join(root, "prisma", "migrations", "init");
 const migrationFile = path.join(migrationDir, "migration.sql");
 

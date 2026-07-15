@@ -71,6 +71,7 @@ CREATE TABLE "assets" (
     "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     "accountId" INTEGER NOT NULL,
     "filePath" TEXT NOT NULL,
+    "fileUrl" TEXT,
     "fileType" TEXT NOT NULL,
     "sourceType" TEXT NOT NULL,
     "location" TEXT NOT NULL DEFAULT '',

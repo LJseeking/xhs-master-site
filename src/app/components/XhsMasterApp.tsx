@@ -12,6 +12,7 @@ import {
   ImageIcon,
   LayoutDashboard,
   Library,
+  LogOut,
   MessageCircle,
   NotebookPen,
   Plus,
@@ -20,10 +21,12 @@ import {
   Send,
   ShieldCheck,
   Sparkles,
+  ExternalLink,
   Trash2,
   Upload,
   Wand2,
 } from "lucide-react";
+import { logout, getToken, getUser, type LoginResponse } from "@/lib/api";
 import type React from "react";
 import clsx from "clsx";
 
@@ -138,6 +141,7 @@ type IndustryKnowledgeResearch = {
 type Asset = {
   id: number;
   filePath: string;
+  fileUrl?: string | null;
   fileType: string;
   sourceType: string;
   tags: string;
@@ -265,6 +269,16 @@ function accountUiMode(accountType?: string) {
 
 function isHikingUiType(accountType?: string) {
   return accountUiMode(accountType) === "outdoor";
+}
+
+async function readJsonResponse<T>(res: Response, fallback: T): Promise<T> {
+  const text = await res.text();
+  if (!text.trim()) return fallback;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(text.slice(0, 300) || "服务返回了无效响应。");
+  }
 }
 
 function assetUiCopy(accountType?: string) {
@@ -770,6 +784,7 @@ export function XhsMasterApp() {
   const [profileContent, setProfileContent] = useState("");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState("");
+  const [currentUser, setCurrentUser] = useState<LoginResponse | null>(null);
   const [promptResults, setPromptResults] = useState<Record<number, PromptResult>>({});
   const [imagePromptResults, setImagePromptResults] = useState<Record<number, ImagePromptResult>>({});
   const [batchImagePostResults, setBatchImagePostResults] = useState<Record<number, BatchImagePostsResult>>({});
@@ -807,7 +822,10 @@ export function XhsMasterApp() {
   const selectedNote = latestPlan?.noteTasks?.find((task) => task.id === selectedNoteId) ?? latestPlan?.noteTasks?.[0];
 
   useEffect(() => {
-    refresh();
+    setCurrentUser(getUser());
+    refresh().catch((error) => {
+      showToast(error instanceof Error ? error.message : "加载账号列表失败。");
+    });
   }, []);
 
   useEffect(() => {
@@ -822,7 +840,11 @@ export function XhsMasterApp() {
 
   async function refresh() {
     const res = await fetch("/api/accounts", { cache: "no-store" });
-    const data = await res.json();
+    const data = await readJsonResponse<{ accounts: Account[]; templates: Template[]; error?: string }>(
+      res,
+      { accounts: [], templates: [] }
+    );
+    if (!res.ok) throw new Error(data.error || "加载账号列表失败。");
     setAccounts(data.accounts);
     setTemplates(data.templates);
     if (!selectedId && data.accounts[0]) setSelectedId(data.accounts[0].id);
@@ -838,10 +860,10 @@ export function XhsMasterApp() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
+      const data = await readJsonResponse<{ id?: number; error?: string }>(res, {});
       if (!res.ok) throw new Error(data.error || "创建失败");
       await refresh();
-      setSelectedId(data.id);
+      setSelectedId(typeof data.id === "number" ? data.id : null);
       setActiveTab("strategy");
       setAccountForm(emptyAccountForm(templates));
       showToast("账号、策划案和配置文件已生成。");
@@ -862,7 +884,7 @@ export function XhsMasterApp() {
     setLoading(true);
     try {
       const res = await fetch(`/api/accounts/${selected.id}`, { method: "DELETE" });
-      const data = await res.json();
+      const data = await readJsonResponse<{ nextAccountId?: number | null; note?: string; error?: string }>(res, {});
       if (!res.ok) throw new Error(data.error || "删除账号失败。");
       setSelectedId(data.nextAccountId ?? null);
       setSelectedNoteId(null);
@@ -899,15 +921,32 @@ export function XhsMasterApp() {
     if (!selected) return;
     const data = new FormData(form);
     data.set("accountId", String(selected.id));
+    const token = getToken();
+    const user = getUser();
+    if (!token || !user) {
+      showToast("登录状态失效，请重新登录后再上传。");
+      return;
+    }
     setLoading(true);
-    const res = await fetch("/api/assets/upload", { method: "POST", body: data });
+    const res = await fetch("/api/assets/upload", {
+      method: "POST",
+      headers: {
+        "Xhs-Sign": token,
+        "Xhs-Person": String(user.uid),
+        "Xhs-Time": Math.floor(Date.now() / 1000).toString(),
+        "Xhs-Request-Id": `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        "Xhs-Test": "1"
+      },
+      body: data
+    });
     if (res.ok) {
       const result = await res.json().catch(() => ({ count: 1 }));
       form.reset();
       await refresh();
-      showToast(`已上传 ${result.count || 1} 个素材到 assets 目录。`);
+      showToast(`已上传 ${result.count || 1} 个素材，并同步了可访问 URL。`);
     } else {
-      showToast("上传失败。");
+      const result = await res.json().catch(() => ({ error: "上传失败。" }));
+      showToast(result.error || "上传失败。");
     }
     setLoading(false);
   }
@@ -1318,7 +1357,7 @@ export function XhsMasterApp() {
 
   async function loadHealth() {
     const res = await fetch("/api/system-health", { cache: "no-store" });
-    setHealth(await res.json());
+    setHealth(await readJsonResponse(res, { status: "error", checks: [], summary: "系统状态接口返回异常。" }));
   }
 
   function showToast(message: string) {
@@ -1406,6 +1445,22 @@ export function XhsMasterApp() {
               <button title="刷新" type="button" onClick={refresh} className="icon-button">
                 <Activity size={17} />
               </button>
+              {currentUser && (
+                <div className="flex items-center gap-2 rounded border border-ink/10 bg-white px-3 py-1.5">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-teal/15 text-xs font-medium text-teal">
+                    {currentUser.name?.charAt(0).toUpperCase() || "U"}
+                  </div>
+                  <span className="text-sm font-medium">{currentUser.name}</span>
+                  <button
+                    type="button"
+                    title="登出"
+                    onClick={logout}
+                    className="ml-1 inline-flex h-7 w-7 items-center justify-center rounded text-ink/50 transition hover:bg-coral/10 hover:text-coral"
+                  >
+                    <LogOut size={15} />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
           <div className="mt-3 flex gap-2 overflow-x-auto lg:hidden">
@@ -2117,21 +2172,36 @@ function AssetsPanel(props: {
           <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-4">
             {selected.assets.map((asset) => (
               <div key={asset.id} className="overflow-hidden rounded border border-ink/10 bg-white">
+                {(() => {
+                  const previewUrl = asset.fileUrl || (asset.filePath.startsWith("/") ? asset.filePath : "");
+                  return (
+                    <>
                 <div className="flex aspect-video items-center justify-center bg-ink/5">
-                  {asset.fileType.startsWith("image") && asset.filePath.startsWith("/") ? (
+                  {asset.fileType.startsWith("image") && previewUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={asset.filePath} alt={asset.tags || "asset"} className="h-full w-full object-cover" />
-                  ) : asset.fileType.startsWith("video") && asset.filePath.startsWith("/") ? (
-                    <video src={asset.filePath} className="h-full w-full object-cover" controls />
+                    <img src={previewUrl} alt={asset.tags || "asset"} className="h-full w-full object-cover" />
+                  ) : asset.fileType.startsWith("video") && previewUrl ? (
+                    <video src={previewUrl} className="h-full w-full object-cover" controls />
                   ) : (
                     <div className="grid place-items-center gap-2 px-4 text-center text-xs text-ink/55">
                       <ImageIcon size={28} />
-                      <span>本地路径素材，供龙虾读取</span>
+                      <span>{asset.fileUrl ? "远程素材，可直接预览" : "本地路径素材，供龙虾读取"}</span>
                     </div>
                   )}
                 </div>
                 <div className="space-y-2 p-3 text-sm">
                   <div className="truncate font-medium">{asset.filePath}</div>
+                  {asset.fileUrl && (
+                    <a
+                      href={asset.fileUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-1 truncate text-xs text-teal hover:underline"
+                    >
+                      <ExternalLink size={13} />
+                      <span>{asset.fileUrl}</span>
+                    </a>
+                  )}
                   <div className="text-ink/60">{asset.sourceType} / {asset.authorizationState}</div>
                   <div>{asset.tags || "未标注标签"}</div>
                   <div className="flex gap-2 text-xs">
@@ -2139,6 +2209,9 @@ function AssetsPanel(props: {
                     <span className={clsx("rounded px-2 py-1", asset.used ? "bg-coral/10 text-coral" : "bg-ink/5")}>已用 {asset.used ? "是" : "否"}</span>
                   </div>
                 </div>
+                    </>
+                  );
+                })()}
               </div>
             ))}
           </div>

@@ -1,67 +1,132 @@
-import fs from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { publicPathForAbsolute } from "@/lib/fsPaths";
 
-function cleanFileName(name: string) {
-  const cleaned = name
-    .replace(/[\\/:*?"<>|#%{}^~[\]`]/g, "-")
-    .replace(/\s+/g, " ")
-    .trim();
-  return cleaned || `素材-${Date.now()}`;
+const RAW_API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:13010";
+const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, "").endsWith("/client")
+  ? RAW_API_BASE_URL.replace(/\/+$/, "")
+  : `${RAW_API_BASE_URL.replace(/\/+$/, "")}/client`;
+
+type BackendResponse<T> = {
+  status: boolean;
+  data: T;
+  message: string;
+  code: string;
+};
+
+type SignedUploadUrlResponse = {
+  auth: string;
+  expireInSecond: number;
+  file: string;
+  signedUrl: string;
+  url: string;
+};
+
+function getFileExt(file: File) {
+  const ext = path.extname(file.name).replace(/^\./, "").trim().toLowerCase();
+  if (ext) return ext;
+  const mime = file.type.split("/")[1] || "";
+  return mime.replace(/[^a-z0-9]/gi, "").toLowerCase() || "bin";
 }
 
-async function uniquePath(dir: string, fileName: string) {
-  const parsed = path.parse(cleanFileName(fileName));
-  let candidate = path.join(dir, `${parsed.name}${parsed.ext}`);
-  let index = 2;
-  while (true) {
-    try {
-      await fs.access(candidate);
-      candidate = path.join(dir, `${parsed.name}-${index}${parsed.ext}`);
-      index += 1;
-    } catch {
-      return candidate;
-    }
+function readRequiredHeader(request: Request, name: string) {
+  return request.headers.get(name) || request.headers.get(name.toLowerCase()) || "";
+}
+
+async function createSignedUpload(file: File, request: Request) {
+  const xhsSign = readRequiredHeader(request, "Xhs-Sign");
+  const xhsPerson = readRequiredHeader(request, "Xhs-Person");
+  const xhsTime = readRequiredHeader(request, "Xhs-Time");
+  const xhsRequestId = readRequiredHeader(request, "Xhs-Request-Id");
+  const xhsTest = readRequiredHeader(request, "Xhs-Test") || "1";
+
+  if (!xhsSign || !xhsPerson || !xhsTime || !xhsRequestId) {
+    throw new Error("登录信息缺失，请重新登录后再上传素材。");
+  }
+
+  const res = await fetch(`${API_BASE_URL}/cos/v1/signedUploadUrl`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "xhs-language": "zh-cn",
+      "xhs-sign": xhsSign,
+      "xhs-person": xhsPerson,
+      "xhs-time": xhsTime,
+      "xhs-request-id": xhsRequestId,
+      "xhs-test": xhsTest
+    },
+    body: JSON.stringify({
+      type: "image",
+      ext: getFileExt(file)
+    })
+  });
+
+  const data = (await res.json()) as BackendResponse<SignedUploadUrlResponse>;
+  if (!res.ok || !data.status || !data.data?.signedUrl || !data.data?.url) {
+    throw new Error(data.message || "获取后端上传地址失败。");
+  }
+
+  return data.data;
+}
+
+async function uploadToSignedUrl(file: File, signedUrl: string) {
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const res = await fetch(signedUrl, {
+    method: "PUT",
+    headers: {
+      "content-type": file.type || "application/octet-stream"
+    },
+    body: buffer
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => "");
+    throw new Error(errorText.slice(0, 200) || "上传文件到对象存储失败。");
   }
 }
 
 export async function POST(request: Request) {
-  const form = await request.formData();
-  const accountId = Number(form.get("accountId"));
-  const files = [...form.getAll("files"), ...form.getAll("file")].filter((item): item is File => item instanceof File);
-  if (!accountId || !files.length) {
-    return NextResponse.json({ error: "缺少 accountId 或图片文件" }, { status: 400 });
+  try {
+    const form = await request.formData();
+    const accountId = Number(form.get("accountId"));
+    const files = [...form.getAll("files"), ...form.getAll("file")].filter((item): item is File => item instanceof File);
+    if (!accountId || !files.length) {
+      return NextResponse.json({ error: "缺少 accountId 或图片文件" }, { status: 400 });
+    }
+
+    const account = await prisma.account.findUnique({ where: { id: accountId } });
+    if (!account) return NextResponse.json({ error: "账号不存在" }, { status: 404 });
+
+    const assets = [];
+
+    for (const file of files) {
+      const signed = await createSignedUpload(file, request);
+      await uploadToSignedUrl(file, signed.signedUrl);
+
+      const asset = await prisma.asset.create({
+        data: {
+          accountId,
+          filePath: signed.file || file.name,
+          fileUrl: signed.url,
+          fileType: file.type || "application/octet-stream",
+          sourceType: String(form.get("sourceType") || "真实素材"),
+          location: String(form.get("location") || ""),
+          shotAt: String(form.get("shotAt") || ""),
+          tags: String(form.get("tags") || ""),
+          suitableTypes: String(form.get("suitableTypes") || ""),
+          coverReady: form.get("coverReady") === "true",
+          authorizationState: String(form.get("authorizationState") || "待确认"),
+          riskNotes: String(form.get("riskNotes") || "")
+        }
+      });
+      assets.push(asset);
+    }
+
+    return NextResponse.json({ count: assets.length, assets });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "上传失败。" },
+      { status: 500 }
+    );
   }
-  const account = await prisma.account.findUnique({ where: { id: accountId } });
-  if (!account) return NextResponse.json({ error: "账号不存在" }, { status: 404 });
-
-  await fs.mkdir(account.assetsPath, { recursive: true });
-  const assets = [];
-
-  for (const file of files) {
-    const absolutePath = await uniquePath(account.assetsPath, file.name);
-    const buffer = Buffer.from(await file.arrayBuffer());
-    await fs.writeFile(absolutePath, buffer);
-
-    const asset = await prisma.asset.create({
-      data: {
-        accountId,
-        filePath: publicPathForAbsolute(absolutePath),
-        fileType: file.type || "application/octet-stream",
-        sourceType: String(form.get("sourceType") || "真实素材"),
-        location: String(form.get("location") || ""),
-        shotAt: String(form.get("shotAt") || ""),
-        tags: String(form.get("tags") || ""),
-        suitableTypes: String(form.get("suitableTypes") || ""),
-        coverReady: form.get("coverReady") === "true",
-        authorizationState: String(form.get("authorizationState") || "待确认"),
-        riskNotes: String(form.get("riskNotes") || "")
-      }
-    });
-    assets.push({ ...asset, localFilePath: absolutePath });
-  }
-
-  return NextResponse.json({ count: assets.length, assets });
 }

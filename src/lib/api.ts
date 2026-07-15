@@ -1,0 +1,174 @@
+/**
+ * 后端 API 客户端工具
+ * 对接 xhs_server Go 后端 (默认 http://localhost:13010/client)
+ */
+
+const RAW_API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:13010";
+const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, "").endsWith("/client")
+  ? RAW_API_BASE_URL.replace(/\/+$/, "")
+  : `${RAW_API_BASE_URL.replace(/\/+$/, "")}/client`;
+
+/* ---------- 类型定义 ---------- */
+
+export interface LoginResponse {
+  uid: number;
+  name: string;
+  avatarUrl: string;
+  role: string;
+  signature: string;
+  signatureNearExpired: number;
+}
+
+export interface ApiResponse<T = unknown> {
+  status: boolean;
+  data: T;
+  message: string;
+  code: string;
+}
+
+/* ---------- localStorage 存储工具 ---------- */
+
+const TOKEN_KEY = "xhs_token";
+const USER_KEY = "xhs_user";
+
+export function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function getUser(): LoginResponse | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(USER_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as LoginResponse;
+  } catch {
+    return null;
+  }
+}
+
+export function setAuth(data: LoginResponse) {
+  localStorage.setItem(TOKEN_KEY, data.signature);
+  localStorage.setItem(USER_KEY, JSON.stringify(data));
+}
+
+export function clearAuth() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+}
+
+export function isLoggedIn(): boolean {
+  return !!getToken();
+}
+
+/* ---------- 通用请求函数 ---------- */
+
+/**
+ * 发送无需签名的请求 (登录/注册)
+ */
+async function publicRequest<T = unknown>(
+  path: string,
+  body: Record<string, unknown>
+): Promise<ApiResponse<T>> {
+  const url = `${API_BASE_URL}${path}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Xhs-Language": "zh-cn"
+    },
+    body: JSON.stringify(body)
+  });
+  return res.json() as Promise<ApiResponse<T>>;
+}
+
+/**
+ * 发送需要签名的请求
+ * 自动携带 JWT Token 和签名头
+ *
+ * 注意: 本地开发环境通过 Xhs-Test: 1 跳过签名校验
+ * 生产环境需通过 Next.js API Route 在服务端计算 MD5 签名
+ */
+export async function authRequest<T = unknown>(
+  path: string,
+  options: { method?: string; body?: Record<string, unknown> } = {}
+): Promise<ApiResponse<T>> {
+  const token = getToken();
+  const user = getUser();
+  if (!token || !user) {
+    throw new Error("未登录");
+  }
+
+  const { method = "GET", body } = options;
+  const bodyStr = body ? JSON.stringify(body) : "";
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Xhs-Language": "zh-cn",
+    "Xhs-Sign": token,
+    "Xhs-Person": String(user.uid),
+    "Xhs-Time": Math.floor(Date.now() / 1000).toString(),
+    "Xhs-Request-Id": `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    "Xhs-Test": "1"
+  };
+
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method,
+    headers,
+    body: bodyStr || undefined
+  });
+  return res.json() as Promise<ApiResponse<T>>;
+}
+
+/* ---------- 业务接口 ---------- */
+
+/**
+ * 登录
+ */
+export async function login(email: string, password: string): Promise<LoginResponse> {
+  const res = await publicRequest<LoginResponse>("/login/v1/login", { email, password });
+  if (!res.status) {
+    throw new Error(res.message || "登录失败");
+  }
+  setAuth(res.data);
+  return res.data;
+}
+
+/**
+ * 注册
+ */
+export async function register(email: string, name: string, password: string): Promise<LoginResponse> {
+  const res = await publicRequest<LoginResponse>("/login/v1/register", { email, name, password });
+  if (!res.status) {
+    throw new Error(res.message || "注册失败");
+  }
+  setAuth(res.data);
+  return res.data;
+}
+
+/**
+ * 自动登录 (使用已有 token 刷新)
+ */
+export async function autoLogin(): Promise<LoginResponse> {
+  const res = await authRequest<LoginResponse>("/login/v1/autoLogin", { method: "POST" });
+  if (!res.status) {
+    throw new Error(res.message || "登录已过期");
+  }
+  setAuth(res.data);
+  return res.data;
+}
+
+/**
+ * 获取用户资料
+ */
+export async function getProfile() {
+  return authRequest("/user/v1/profile");
+}
+
+/**
+ * 登出
+ */
+export function logout() {
+  clearAuth();
+  window.location.href = "/login";
+}

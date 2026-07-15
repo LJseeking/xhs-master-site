@@ -156,6 +156,7 @@ model Asset {
   id                 Int      @id @default(autoincrement())
   accountId          Int
   filePath           String
+  fileUrl            String?
   fileType           String
   sourceType         String
   location           String   @default("")

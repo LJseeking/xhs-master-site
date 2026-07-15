@@ -1,5 +1,10 @@
 import { XhsMasterApp } from "@/app/components/XhsMasterApp";
+import { AuthGuard } from "@/app/components/AuthGuard";
 
 export default function Home() {
-  return <XhsMasterApp />;
+  return (
+    <AuthGuard>
+      <XhsMasterApp />
+    </AuthGuard>
+  );
 }

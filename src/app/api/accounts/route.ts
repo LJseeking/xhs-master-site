@@ -24,11 +24,160 @@ const accountSchema = z.object({
   taboos: z.string().default("")
 });
 
+function isMissingTableError(error: unknown) {
+  return error instanceof Error && error.message.includes("does not exist in the current database");
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof z.ZodError) {
+    return error.issues[0]?.message || "请求参数不合法";
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return "服务异常，请稍后重试。";
+}
+
+function buildFallbackTemplates() {
+  return accountTypeTemplates.map((template, index) => ({
+    id: index + 1,
+    typeKey: template.typeKey,
+    name: template.name,
+    defaultColumns: JSON.stringify(template.defaultColumns),
+    weeklyRatio: JSON.stringify(template.weeklyRatio),
+    imageStrategy: JSON.stringify(template.imageStrategy),
+    titleStrategy: JSON.stringify(template.titleStrategy),
+    coverStrategy: JSON.stringify(template.coverStrategy),
+    interactionStrategy: JSON.stringify(template.interactionStrategy),
+    commercializationPath: JSON.stringify(template.commercializationPath),
+    riskRules: JSON.stringify(template.riskRules),
+    promptRules: JSON.stringify(template.promptRules),
+    createdAt: new Date(0),
+    updatedAt: new Date(0)
+  }));
+}
+
 export async function GET() {
-  const templateOrder = new Map(accountTypeTemplates.map((template, index) => [template.typeKey, index]));
-  const [accounts, templates] = await Promise.all([
-    prisma.account.findMany({
-      orderBy: { updatedAt: "desc" },
+  try {
+    const templateOrder = new Map(accountTypeTemplates.map((template, index) => [template.typeKey, index]));
+    const [accounts, templates] = await Promise.all([
+      prisma.account.findMany({
+        orderBy: { updatedAt: "desc" },
+        include: {
+          strategy: true,
+          profile: true,
+          referenceResearches: { orderBy: { createdAt: "desc" }, take: 5 },
+          imageStyleStudies: { orderBy: { createdAt: "desc" }, take: 5 },
+          interactionPlans: { orderBy: { createdAt: "desc" }, take: 8 },
+          postReviews: { orderBy: { createdAt: "desc" }, take: 8 },
+          expertRules: { orderBy: { createdAt: "desc" }, take: 20 },
+          industryKnowledgeResearches: { orderBy: { createdAt: "desc" }, take: 5 },
+          assets: { orderBy: { createdAt: "desc" }, take: 50 },
+          weeklyPlans: { orderBy: { createdAt: "desc" }, include: { noteTasks: true }, take: 10 }
+        }
+      }),
+      prisma.accountTypeTemplate.findMany({ orderBy: { id: "asc" } })
+    ]);
+    const sortedTemplates = [...templates].sort(
+      (a, b) => (templateOrder.get(a.typeKey) ?? 999) - (templateOrder.get(b.typeKey) ?? 999)
+    );
+    return NextResponse.json({ accounts, templates: sortedTemplates });
+  } catch (error) {
+    if (isMissingTableError(error)) {
+      return NextResponse.json({
+        accounts: [],
+        templates: buildFallbackTemplates(),
+        error: "本地数据库尚未初始化，已临时使用内置模板。创建账号前请先初始化本地数据。"
+      });
+    }
+    return NextResponse.json({ error: getErrorMessage(error), accounts: [], templates: [] }, { status: 500 });
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const body = accountSchema.parse(await request.json());
+    const dirs = await ensureAccountDirs(body.name);
+    const normalizedTypeKey = normalizeAccountTypeKey(body.accountType);
+
+    let template = await prisma.accountTypeTemplate.findUnique({ where: { typeKey: normalizedTypeKey } }).catch((error) => {
+      if (isMissingTableError(error)) return null;
+      throw error;
+    });
+
+    if (!template) {
+      const fallbackTemplate = accountTypeTemplates.find((item) => item.typeKey === normalizedTypeKey);
+      if (fallbackTemplate) {
+        template = {
+          id: 0,
+          typeKey: fallbackTemplate.typeKey,
+          name: fallbackTemplate.name,
+          defaultColumns: JSON.stringify(fallbackTemplate.defaultColumns),
+          weeklyRatio: JSON.stringify(fallbackTemplate.weeklyRatio),
+          imageStrategy: JSON.stringify(fallbackTemplate.imageStrategy),
+          titleStrategy: JSON.stringify(fallbackTemplate.titleStrategy),
+          coverStrategy: JSON.stringify(fallbackTemplate.coverStrategy),
+          interactionStrategy: JSON.stringify(fallbackTemplate.interactionStrategy),
+          commercializationPath: JSON.stringify(fallbackTemplate.commercializationPath),
+          riskRules: JSON.stringify(fallbackTemplate.riskRules),
+          promptRules: JSON.stringify(fallbackTemplate.promptRules),
+          createdAt: new Date(0),
+          updatedAt: new Date(0)
+        };
+      }
+    }
+
+    if (!template) {
+      return NextResponse.json({ error: "未知账号类型，请先运行 npm run db:init 初始化模板。" }, { status: 400 });
+    }
+
+    const account = await prisma.account.create({
+      data: {
+        ...body,
+        accountType: normalizedTypeKey,
+        profilePath: dirs.profilePath,
+        assetsPath: dirs.assetsPath
+      }
+    });
+
+    const fallbackStrategy = buildAccountStrategy(account, template);
+    const strategyResult = await generateStrategyWithLlm(account, template, fallbackStrategy);
+    const strategy = strategyResult.data;
+    await fs.writeFile(account.profilePath, strategy.agentsMdContent, "utf8");
+
+    await prisma.accountStrategy.create({
+      data: {
+        accountId: account.id,
+        positioning: strategy.positioning,
+        strategyJson: strategy.strategyJson,
+        markdown: strategy.markdown,
+        agentsMdContent: strategy.agentsMdContent,
+        execGuide: strategy.execGuide
+      }
+    });
+
+    await prisma.accountProfile.create({
+      data: {
+        accountId: account.id,
+        path: account.profilePath,
+        content: strategy.agentsMdContent,
+        versions: JSON.stringify([{ version: 1, savedAt: new Date().toISOString(), content: strategy.agentsMdContent }])
+      }
+    });
+
+    await prisma.systemLog.create({
+      data: {
+        accountId: account.id,
+        level: strategyResult.usedLlm ? "info" : strategyResult.error ? "warn" : "info",
+        message: strategyResult.usedLlm
+          ? `使用 OpenAI API 生成账号策划与 AGENTS.md：${account.name}`
+          : `使用内置模板生成账号策划与 AGENTS.md：${account.name}`,
+        meta: JSON.stringify({ llm: strategyResult.usedLlm, error: strategyResult.usedLlm ? null : strategyResult.error || null })
+      }
+    });
+
+    const full = await prisma.account.findUnique({
+      where: { id: account.id },
       include: {
         strategy: true,
         profile: true,
@@ -38,86 +187,13 @@ export async function GET() {
         postReviews: { orderBy: { createdAt: "desc" }, take: 8 },
         expertRules: { orderBy: { createdAt: "desc" }, take: 20 },
         industryKnowledgeResearches: { orderBy: { createdAt: "desc" }, take: 5 },
-        assets: { orderBy: { createdAt: "desc" }, take: 50 },
-        weeklyPlans: { orderBy: { createdAt: "desc" }, include: { noteTasks: true }, take: 10 }
+        assets: true,
+        weeklyPlans: { include: { noteTasks: true } }
       }
-    }),
-    prisma.accountTypeTemplate.findMany({ orderBy: { id: "asc" } })
-  ]);
-  const sortedTemplates = [...templates].sort(
-    (a, b) => (templateOrder.get(a.typeKey) ?? 999) - (templateOrder.get(b.typeKey) ?? 999)
-  );
-  return NextResponse.json({ accounts, templates: sortedTemplates });
-}
+    });
 
-export async function POST(request: Request) {
-  const body = accountSchema.parse(await request.json());
-  const dirs = await ensureAccountDirs(body.name);
-  const template = await prisma.accountTypeTemplate.findUnique({ where: { typeKey: normalizeAccountTypeKey(body.accountType) } });
-
-  if (!template) {
-    return NextResponse.json({ error: "未知账号类型，请先运行 npm run db:init 初始化模板。" }, { status: 400 });
+    return NextResponse.json(full);
+  } catch (error) {
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
-
-  const account = await prisma.account.create({
-    data: {
-      ...body,
-      profilePath: dirs.profilePath,
-      assetsPath: dirs.assetsPath
-    }
-  });
-
-  const fallbackStrategy = buildAccountStrategy(account, template);
-  const strategyResult = await generateStrategyWithLlm(account, template, fallbackStrategy);
-  const strategy = strategyResult.data;
-  await fs.writeFile(account.profilePath, strategy.agentsMdContent, "utf8");
-
-  await prisma.accountStrategy.create({
-    data: {
-      accountId: account.id,
-      positioning: strategy.positioning,
-      strategyJson: strategy.strategyJson,
-      markdown: strategy.markdown,
-      agentsMdContent: strategy.agentsMdContent,
-      execGuide: strategy.execGuide
-    }
-  });
-
-  await prisma.accountProfile.create({
-    data: {
-      accountId: account.id,
-      path: account.profilePath,
-      content: strategy.agentsMdContent,
-      versions: JSON.stringify([{ version: 1, savedAt: new Date().toISOString(), content: strategy.agentsMdContent }])
-    }
-  });
-
-  await prisma.systemLog.create({
-    data: {
-      accountId: account.id,
-      level: strategyResult.usedLlm ? "info" : strategyResult.error ? "warn" : "info",
-      message: strategyResult.usedLlm
-        ? `使用 OpenAI API 生成账号策划与 AGENTS.md：${account.name}`
-        : `使用内置模板生成账号策划与 AGENTS.md：${account.name}`,
-      meta: JSON.stringify({ llm: strategyResult.usedLlm, error: strategyResult.usedLlm ? null : strategyResult.error || null })
-    }
-  });
-
-  const full = await prisma.account.findUnique({
-    where: { id: account.id },
-    include: {
-      strategy: true,
-      profile: true,
-      referenceResearches: { orderBy: { createdAt: "desc" }, take: 5 },
-      imageStyleStudies: { orderBy: { createdAt: "desc" }, take: 5 },
-      interactionPlans: { orderBy: { createdAt: "desc" }, take: 8 },
-      postReviews: { orderBy: { createdAt: "desc" }, take: 8 },
-      expertRules: { orderBy: { createdAt: "desc" }, take: 20 },
-      industryKnowledgeResearches: { orderBy: { createdAt: "desc" }, take: 5 },
-      assets: true,
-      weeklyPlans: { include: { noteTasks: true } }
-    }
-  });
-
-  return NextResponse.json(full);
 }

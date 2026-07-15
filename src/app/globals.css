@@ -14,6 +14,7 @@ body {
   margin: 0;
   background: #f7f5ef;
   color: #1f2933;
+  font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
 }
 
 button,
@@ -41,7 +42,7 @@ textarea {
   }
 
   .primary-button {
-    @apply inline-flex h-10 items-center justify-center gap-2 rounded bg-ink px-4 text-sm font-medium text-white transition hover:bg-ink/90 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex h-11 items-center justify-center gap-2 rounded bg-ink px-4 text-base font-medium leading-none text-white transition hover:bg-ink/90 disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .secondary-button {
@@ -53,7 +54,7 @@ textarea {
   }
 
   .field {
-    @apply grid gap-1 text-sm;
+    @apply grid gap-1.5 text-sm;
   }
 
   .field span {
@@ -63,7 +64,11 @@ textarea {
   .field input,
   .field textarea,
   .field select {
-    @apply w-full rounded border border-ink/15 bg-white px-3 py-2 text-sm outline-none transition focus:border-teal focus:ring-2 focus:ring-teal/15;
+    @apply h-11 w-full rounded border border-ink/15 bg-white px-3 text-sm leading-none outline-none transition focus:border-teal focus:ring-2 focus:ring-teal/15;
+  }
+
+  .field .input-with-icon {
+    @apply pl-11;
   }
 
   .code-textarea {
