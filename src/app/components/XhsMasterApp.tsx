@@ -281,6 +281,38 @@ async function readJsonResponse<T>(res: Response, fallback: T): Promise<T> {
   }
 }
 
+function formatFileSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value >= 100 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function summarizeFiles(files: File[]) {
+  return {
+    count: files.length,
+    totalBytes: files.reduce((sum, file) => sum + file.size, 0)
+  };
+}
+
+function mergeFiles(current: File[], incoming: File[]) {
+  const seen = new Set(current.map((file) => `${file.name}-${file.size}-${file.lastModified}`));
+  const merged = [...current];
+  for (const file of incoming) {
+    const key = `${file.name}-${file.size}-${file.lastModified}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(file);
+    }
+  }
+  return merged;
+}
+
 function assetUiCopy(accountType?: string) {
   const mode = accountUiMode(accountType);
   const copies = {
@@ -963,11 +995,11 @@ export function XhsMasterApp() {
         body: JSON.stringify({ ...payload, accountId: selected.id })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "登记文件夹失败。");
+      if (!res.ok) throw new Error(data.error || "批量导入素材失败。");
       await refresh();
-      showToast(`已登记 ${data.imported} 个素材，跳过 ${data.skipped} 个已存在文件。`);
+      showToast(`已批量导入 ${data.imported} 个素材，跳过 ${data.skipped} 个已存在文件。`);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "登记文件夹失败。");
+      showToast(error instanceof Error ? error.message : "批量导入素材失败。");
     } finally {
       setLoading(false);
     }
@@ -2121,21 +2153,21 @@ function AssetsPanel(props: {
       >
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="section-title">登记大素材包（高级）</h2>
+            <h2 className="section-title">批量上传素材包（高级）</h2>
             <p className="mt-1 text-sm text-ink/60">
-              图片特别多、已经在这台电脑或共享盘里整理好时，用这里登记文件夹路径；系统只登记路径，不复制文件。
+              图片特别多、已经在这台电脑或共享盘里整理好时，用这里批量导入整个文件夹；系统会扫描文件并登记到素材库，不重复复制文件。
             </p>
           </div>
           <button type="submit" className="secondary-button">
-            <Library size={17} /> 登记文件夹
+            <Library size={17} /> 批量上传
           </button>
         </div>
         <div className="grid gap-3 md:grid-cols-4">
           <Input
             name="folderPath"
-            label="这台电脑可访问的图片文件夹"
+            label="这台电脑可访问的素材文件夹"
             placeholder={copyText.folderPlaceholder}
-            help="如果图片在客户其他电脑，先用 U 盘、网盘同步或共享盘挂载到这台电脑，再填写这里。"
+            help="如果图片在客户其他电脑，先用 U 盘、网盘同步或共享盘挂载到这台电脑；系统会扫描这个文件夹并批量导入素材记录。"
           />
           <label className="field">
             <span>来源类型</span>
@@ -2484,6 +2516,41 @@ function ImagesPanel(props: {
   const [singleSourceMode, setSingleSourceMode] = useState<SingleImageSourceMode>("folder_select");
   const [singleImageGoal, setSingleImageGoal] = useState("围绕这篇笔记内容，生成封面、图集顺序、图上文字、正文结构和风险核验。");
   const [singleImageCount, setSingleImageCount] = useState("5");
+  const [batchUploadFiles, setBatchUploadFiles] = useState<File[]>([]);
+  const [singleManualFiles, setSingleManualFiles] = useState<File[]>([]);
+
+  async function uploadFilesWithAuth(files: File[], options?: { suitableTypes?: string; tags?: string }) {
+    const token = getToken();
+    const user = getUser();
+    if (!token || !user) {
+      throw new Error("登录状态失效，请重新登录后再上传。");
+    }
+
+    const uploadForm = new FormData();
+    uploadForm.set("accountId", String(selected?.id || ""));
+    uploadForm.set("sourceType", "真实素材");
+    uploadForm.set("authorizationState", "待确认");
+    uploadForm.set("tags", options?.tags || "");
+    uploadForm.set("suitableTypes", options?.suitableTypes || "");
+    for (const file of files) uploadForm.append("files", file);
+
+    const uploadRes = await fetch("/api/assets/upload", {
+      method: "POST",
+      headers: {
+        "Xhs-Sign": token,
+        "Xhs-Person": String(user.uid),
+        "Xhs-Time": Math.floor(Date.now() / 1000).toString(),
+        "Xhs-Request-Id": `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        "Xhs-Test": "1"
+      },
+      body: uploadForm
+    });
+    const uploadData = await uploadRes.json().catch(() => ({}));
+    if (!uploadRes.ok) {
+      throw new Error(uploadData.error || "上传图片失败。");
+    }
+    return uploadData as { count?: number; assets?: Array<{ filePath: string; localFilePath?: string }> };
+  }
 
   {
     const batchCommand = batchImagePostResult?.commands?.[0];
@@ -2528,12 +2595,32 @@ function ImagesPanel(props: {
               onSubmit={(event) => {
                 event.preventDefault();
                 const form = new FormData(event.currentTarget);
-                generateBatchImagePosts({
-                  weeks: String(form.get("weeks") || "1"),
-                  openclawAssetsDir: String(form.get("openclawAssetsDir") || ""),
-                  openclawImagePaths: String(form.get("openclawImagePaths") || ""),
-                  planningGoal: String(form.get("planningGoal") || "")
-                });
+                const run = async () => {
+                  let imagePaths = String(form.get("openclawImagePaths") || "");
+                  const assetsDir = String(form.get("openclawAssetsDir") || "");
+                  if (batchUploadFiles.length) {
+                    const uploadData = await uploadFilesWithAuth(batchUploadFiles, {
+                      tags: "批量自动模式上传",
+                      suitableTypes: selected?.accountType || ""
+                    });
+                    const uploadedPaths = (uploadData.assets || [])
+                      .map((asset) => asset.localFilePath || asset.filePath)
+                      .filter(Boolean)
+                      .join("\n");
+                    imagePaths = [imagePaths, uploadedPaths].filter(Boolean).join("\n");
+                  }
+
+                  await generateBatchImagePosts({
+                    weeks: String(form.get("weeks") || "1"),
+                    openclawAssetsDir: assetsDir,
+                    openclawImagePaths: imagePaths,
+                    planningGoal: String(form.get("planningGoal") || "")
+                  });
+                  if (batchUploadFiles.length) {
+                    setBatchUploadFiles([]);
+                  }
+                };
+                run().catch((error) => window.alert(error instanceof Error ? error.message : "生成批量帖子任务失败。"));
               }}
             >
               <div className="mb-4">
@@ -2560,6 +2647,39 @@ function ImagesPanel(props: {
               </div>
 
               <div className="mt-3 grid gap-3">
+                <label className="field">
+                  <span>直接批量上传图片到后端素材库（可选）</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={(event) => {
+                      const nextFiles = Array.from(event.target.files || []);
+                      setBatchUploadFiles((current) => mergeFiles(current, nextFiles));
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                  <span className="text-xs text-ink/50">
+                    可以一次多选，也可以连续多次选择追加进去。Windows 下可按 `Ctrl` / `Shift` 多选。生成任务前会先走后端批量上传接口，再把这批图加入优先分析范围。
+                  </span>
+                </label>
+                {batchUploadFiles.length > 0 && (
+                  <div className="rounded border border-teal/20 bg-teal/5 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-sm font-medium text-teal">
+                        已选择 {summarizeFiles(batchUploadFiles).count} 张图，合计 {formatFileSize(summarizeFiles(batchUploadFiles).totalBytes)}
+                      </div>
+                      <button type="button" className="text-xs text-ink/55 underline-offset-2 hover:underline" onClick={() => setBatchUploadFiles([])}>
+                        清空本次选择
+                      </button>
+                    </div>
+                    <div className="mt-2 max-h-32 overflow-auto rounded bg-white/80 px-3 py-2 text-xs text-ink/65">
+                      {batchUploadFiles.map((file) => (
+                        <div key={`${file.name}-${file.size}-${file.lastModified}`}>{file.name} · {formatFileSize(file.size)}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <Textarea
                   name="planningGoal"
                   label="批量生成要求"
@@ -2625,20 +2745,11 @@ function ImagesPanel(props: {
                   let imagePaths = String(form.get("openclawImagePaths") || "");
                   let assetsDir = String(form.get("openclawAssetsDir") || "");
                   if (singleSourceMode === "manual_images") {
-                    const files = form
-                      .getAll("manualImageFiles")
-                      .filter((item): item is File => item instanceof File && item.size > 0);
-                    if (files.length) {
-                      const uploadForm = new FormData();
-                      uploadForm.set("accountId", String(selected?.id || ""));
-                      uploadForm.set("sourceType", "真实素材");
-                      uploadForm.set("authorizationState", "待确认");
-                      uploadForm.set("tags", "单篇精修上传");
-                      uploadForm.set("suitableTypes", note.topicTitle);
-                      for (const file of files) uploadForm.append("files", file);
-                      const uploadRes = await fetch("/api/assets/upload", { method: "POST", body: uploadForm });
-                      const uploadData = await uploadRes.json();
-                      if (!uploadRes.ok) throw new Error(uploadData.error || "上传图片失败。");
+                    if (singleManualFiles.length) {
+                      const uploadData = await uploadFilesWithAuth(singleManualFiles, {
+                        tags: "单篇精修上传",
+                        suitableTypes: note.topicTitle
+                      });
                       imagePaths = (uploadData.assets || []).map((asset: { filePath: string; localFilePath?: string }) => asset.localFilePath || asset.filePath).join("\n");
                       assetsDir = selected?.assetsPath || assetsDir;
                     }
@@ -2651,6 +2762,9 @@ function ImagesPanel(props: {
                     openclawAssetsDir: assetsDir,
                     openclawImagePaths: imagePaths
                   });
+                  if (singleSourceMode === "manual_images" && singleManualFiles.length) {
+                    setSingleManualFiles([]);
+                  }
                 };
                 run().catch((error) => window.alert(error instanceof Error ? error.message : "生成单篇图片方案失败。"));
               }}
@@ -2717,7 +2831,7 @@ function ImagesPanel(props: {
                   <Input name="imageCount" label="图片数量" defaultValue={singleImageCount} onChange={setSingleImageCount} placeholder="5" />
                   {singleSourceMode === "manual_images" ? (
                     <div className="rounded border border-ink/10 bg-white p-3 text-sm leading-6 text-ink/60">
-                      上传的图片会保存到当前账号素材库：{selected?.assetsPath || "assets/当前账号"}
+                      上传的图片会先进入当前账号的服务端素材库，再写入这篇任务的优先图片列表。
                     </div>
                   ) : (
                     <Input
@@ -2732,11 +2846,39 @@ function ImagesPanel(props: {
                 {singleSourceMode === "manual_images" && (
                   <label className="field">
                     <span>上传这篇要用的图片</span>
-                    <input name="manualImageFiles" type="file" accept="image/*" multiple required />
+                    <input
+                      name="manualImageFiles"
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      required
+                      onChange={(event) => {
+                        const nextFiles = Array.from(event.target.files || []);
+                        setSingleManualFiles((current) => mergeFiles(current, nextFiles));
+                        event.currentTarget.value = "";
+                      }}
+                    />
                     <span className="text-xs leading-5 text-ink/50">
-                      上传后系统会保存到本地素材库，并把保存后的文件路径写入给龙虾的任务。龙虾处理的是本机文件，不是浏览器临时文件。
+                      可以一次多选，也可以连续多次选择追加进去。提交时会先批量上传到服务端素材库，再把这批图加入当前任务的优先图片列表。
                     </span>
                   </label>
+                )}
+                {singleSourceMode === "manual_images" && singleManualFiles.length > 0 && (
+                  <div className="rounded border border-teal/20 bg-teal/5 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-sm font-medium text-teal">
+                        本篇已选择 {summarizeFiles(singleManualFiles).count} 张图，合计 {formatFileSize(summarizeFiles(singleManualFiles).totalBytes)}
+                      </div>
+                      <button type="button" className="text-xs text-ink/55 underline-offset-2 hover:underline" onClick={() => setSingleManualFiles([])}>
+                        清空本次选择
+                      </button>
+                    </div>
+                    <div className="mt-2 max-h-28 overflow-auto rounded bg-white/80 px-3 py-2 text-xs text-ink/65">
+                      {singleManualFiles.map((file) => (
+                        <div key={`${file.name}-${file.size}-${file.lastModified}`}>{file.name} · {formatFileSize(file.size)}</div>
+                      ))}
+                    </div>
+                  </div>
                 )}
                 {singleSourceMode === "manual_images" && <input type="hidden" name="openclawAssetsDir" value={selected?.assetsPath || ""} readOnly />}
                 {singleSourceMode !== "manual_images" && <input type="hidden" name="openclawImagePaths" value="" readOnly />}

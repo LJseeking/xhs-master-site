@@ -22,6 +22,10 @@ type SignedUploadUrlResponse = {
   url: string;
 };
 
+type BatchSignedUploadUrlResponse = {
+  items: SignedUploadUrlResponse[];
+};
+
 function getFileExt(file: File) {
   const ext = path.extname(file.name).replace(/^\./, "").trim().toLowerCase();
   if (ext) return ext;
@@ -69,6 +73,45 @@ async function createSignedUpload(file: File, request: Request) {
   return data.data;
 }
 
+async function createBatchSignedUploads(files: File[], request: Request) {
+  const xhsSign = readRequiredHeader(request, "Xhs-Sign");
+  const xhsPerson = readRequiredHeader(request, "Xhs-Person");
+  const xhsTime = readRequiredHeader(request, "Xhs-Time");
+  const xhsRequestId = readRequiredHeader(request, "Xhs-Request-Id");
+  const xhsTest = readRequiredHeader(request, "Xhs-Test") || "1";
+
+  if (!xhsSign || !xhsPerson || !xhsTime || !xhsRequestId) {
+    throw new Error("登录信息缺失，请重新登录后再上传素材。");
+  }
+
+  const res = await fetch(`${API_BASE_URL}/cos/v1/batchSignedUploadUrl`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "xhs-language": "zh-cn",
+      "xhs-sign": xhsSign,
+      "xhs-person": xhsPerson,
+      "xhs-time": xhsTime,
+      "xhs-request-id": xhsRequestId,
+      "xhs-test": xhsTest
+    },
+    body: JSON.stringify({
+      type: "image",
+      exts: files.map((file) => getFileExt(file))
+    })
+  });
+
+  const data = (await res.json()) as BackendResponse<BatchSignedUploadUrlResponse>;
+  if (!res.ok || !data.status || !Array.isArray(data.data?.items)) {
+    throw new Error(data.message || "获取后端批量上传地址失败。");
+  }
+  if (data.data.items.length !== files.length) {
+    throw new Error("后端批量上传地址数量和文件数量不一致。");
+  }
+
+  return data.data.items;
+}
+
 async function uploadToSignedUrl(file: File, signedUrl: string) {
   const buffer = Buffer.from(await file.arrayBuffer());
   const res = await fetch(signedUrl, {
@@ -98,9 +141,19 @@ export async function POST(request: Request) {
     if (!account) return NextResponse.json({ error: "账号不存在" }, { status: 404 });
 
     const assets = [];
+    const signedUploads =
+      files.length > 1
+        ? await createBatchSignedUploads(files, request).catch(async () => {
+            const fallbackItems = [];
+            for (const file of files) {
+              fallbackItems.push(await createSignedUpload(file, request));
+            }
+            return fallbackItems;
+          })
+        : [await createSignedUpload(files[0], request)];
 
-    for (const file of files) {
-      const signed = await createSignedUpload(file, request);
+    for (const [index, file] of files.entries()) {
+      const signed = signedUploads[index];
       await uploadToSignedUrl(file, signed.signedUrl);
 
       const asset = await prisma.asset.create({

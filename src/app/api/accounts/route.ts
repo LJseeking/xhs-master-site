@@ -57,24 +57,52 @@ function buildFallbackTemplates() {
   }));
 }
 
+async function getExistingTableNames() {
+  const rows = await prisma.$queryRawUnsafe<Array<{ name: string }>>(
+    "SELECT name FROM sqlite_master WHERE type='table'"
+  );
+  return new Set(rows.map((row) => row.name));
+}
+
+function buildAccountInclude(existingTables?: Set<string>) {
+  const has = (tableName: string) => !existingTables || existingTables.has(tableName);
+
+  return {
+    strategy: true,
+    profile: true,
+    ...(has("account_reference_researches")
+      ? { referenceResearches: { orderBy: { createdAt: "desc" as const }, take: 5 } }
+      : {}),
+    ...(has("account_image_style_studies")
+      ? { imageStyleStudies: { orderBy: { createdAt: "desc" as const }, take: 5 } }
+      : {}),
+    ...(has("account_interaction_plans")
+      ? { interactionPlans: { orderBy: { createdAt: "desc" as const }, take: 8 } }
+      : {}),
+    ...(has("post_reviews")
+      ? { postReviews: { orderBy: { createdAt: "desc" as const }, take: 8 } }
+      : {}),
+    ...(has("expert_rules")
+      ? { expertRules: { orderBy: { createdAt: "desc" as const }, take: 20 } }
+      : {}),
+    ...(has("industry_knowledge_researches")
+      ? { industryKnowledgeResearches: { orderBy: { createdAt: "desc" as const }, take: 5 } }
+      : {}),
+    ...(has("assets") ? { assets: { orderBy: { createdAt: "desc" as const }, take: 50 } } : {}),
+    ...(has("weekly_plans")
+      ? { weeklyPlans: { orderBy: { createdAt: "desc" as const }, include: { noteTasks: true }, take: 10 } }
+      : {})
+  };
+}
+
 export async function GET() {
   try {
     const templateOrder = new Map(accountTypeTemplates.map((template, index) => [template.typeKey, index]));
+    const existingTables = await getExistingTableNames();
     const [accounts, templates] = await Promise.all([
       prisma.account.findMany({
         orderBy: { updatedAt: "desc" },
-        include: {
-          strategy: true,
-          profile: true,
-          referenceResearches: { orderBy: { createdAt: "desc" }, take: 5 },
-          imageStyleStudies: { orderBy: { createdAt: "desc" }, take: 5 },
-          interactionPlans: { orderBy: { createdAt: "desc" }, take: 8 },
-          postReviews: { orderBy: { createdAt: "desc" }, take: 8 },
-          expertRules: { orderBy: { createdAt: "desc" }, take: 20 },
-          industryKnowledgeResearches: { orderBy: { createdAt: "desc" }, take: 5 },
-          assets: { orderBy: { createdAt: "desc" }, take: 50 },
-          weeklyPlans: { orderBy: { createdAt: "desc" }, include: { noteTasks: true }, take: 10 }
-        }
+        include: buildAccountInclude(existingTables)
       }),
       prisma.accountTypeTemplate.findMany({ orderBy: { id: "asc" } })
     ]);

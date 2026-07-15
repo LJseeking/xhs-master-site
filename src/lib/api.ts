@@ -61,6 +61,24 @@ export function isLoggedIn(): boolean {
   return !!getToken();
 }
 
+export function buildAuthHeaders() {
+  const token = getToken();
+  const user = getUser();
+  if (!token || !user) {
+    throw new Error("未登录");
+  }
+
+  return {
+    "Content-Type": "application/json",
+    "Xhs-Language": "zh-cn",
+    "Xhs-Sign": token,
+    "Xhs-Person": String(user.uid),
+    "Xhs-Time": Math.floor(Date.now() / 1000).toString(),
+    "Xhs-Request-Id": `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    "Xhs-Test": "1"
+  };
+}
+
 /* ---------- 通用请求函数 ---------- */
 
 /**
@@ -93,24 +111,9 @@ export async function authRequest<T = unknown>(
   path: string,
   options: { method?: string; body?: Record<string, unknown> } = {}
 ): Promise<ApiResponse<T>> {
-  const token = getToken();
-  const user = getUser();
-  if (!token || !user) {
-    throw new Error("未登录");
-  }
-
   const { method = "GET", body } = options;
   const bodyStr = body ? JSON.stringify(body) : "";
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "Xhs-Language": "zh-cn",
-    "Xhs-Sign": token,
-    "Xhs-Person": String(user.uid),
-    "Xhs-Time": Math.floor(Date.now() / 1000).toString(),
-    "Xhs-Request-Id": `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-    "Xhs-Test": "1"
-  };
+  const headers = buildAuthHeaders();
 
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method,
@@ -163,6 +166,28 @@ export async function autoLogin(): Promise<LoginResponse> {
  */
 export async function getProfile() {
   return authRequest("/user/v1/profile");
+}
+
+export async function syncBackendAccounts() {
+  const res = await fetch("/api/accounts/sync", {
+    method: "POST",
+    headers: buildAuthHeaders()
+  });
+
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    synced?: number;
+    created?: number;
+    updated?: number;
+    skipped?: number;
+    error?: string;
+  };
+
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || "同步后端账号失败");
+  }
+
+  return data;
 }
 
 /**

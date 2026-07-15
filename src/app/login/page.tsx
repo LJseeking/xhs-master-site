@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { ShieldCheck, Mail, Lock, User, Loader2 } from "lucide-react";
-import { login, register, isLoggedIn } from "@/lib/api";
+import { login, register, isLoggedIn, syncBackendAccounts } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -27,6 +27,7 @@ export default function LoginPage() {
     try {
       if (mode === "login") {
         await login(email, password);
+        await syncBackendAccounts();
       } else {
         if (!name.trim()) {
           setError("请输入用户名");
