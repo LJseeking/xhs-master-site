@@ -110,11 +110,11 @@ function build {
   version=$2
 
   cd "$script_dir"/../output || exit
-  docker build -t "$IMAGE"/xhs-"$environment"/xhs-frontend:"$version" -f "./Dockerfile" .
+  docker build -t "$IMAGE"/xhs-"$environment"/frontend:"$version" -f "./Dockerfile" .
   if [[ "$environment" == "local" ]]; then
     echo "local 环境仅构建镜像，不执行 push"
   else
-    docker push "$IMAGE"/xhs-"$environment"/xhs-frontend:"$version"
+    docker push "$IMAGE"/xhs-"$environment"/frontend:"$version"
   fi
 }
 
