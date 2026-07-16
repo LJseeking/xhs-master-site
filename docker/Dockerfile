@@ -22,7 +22,6 @@ COPY --chown=nextjs:nodejs ./assets ./assets
 COPY --chown=nextjs:nodejs ./profiles ./profiles
 COPY --chown=nextjs:nodejs ./prompts ./prompts
 COPY --chown=nextjs:nodejs ./local-data ./local-data
-COPY --chown=nextjs:nodejs ./.env ./.env
 COPY --chown=nextjs:nodejs ./.env.local ./.env.local
 COPY --chown=nextjs:nodejs ./entrypoint /app/entrypoint
 

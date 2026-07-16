@@ -79,8 +79,11 @@ try {
     "OPENAI_BASE_URL"
   ];
   const extraLines = passthroughKeys
-    .filter((key) => typeof baseEnv[key] === "string" && baseEnv[key] !== "")
-    .map((key) => `${key}=${baseEnv[key]}`);
+    .map((key) => {
+      const value = process.env[key] || baseEnv[key];
+      return typeof value === "string" && value !== "" ? `${key}=${value}` : null;
+    })
+    .filter(Boolean);
   const content = [
     `NEXT_PUBLIC_APP_ENVIRONMENT=${config.appEnvironment}`,
     `NEXT_PUBLIC_API_BASE_URL=${config.apiBaseUrl}`,
