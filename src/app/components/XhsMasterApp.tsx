@@ -38,6 +38,7 @@ import {
   type BackendAccountDetail,
   type LoginResponse
 } from "@/lib/api";
+import { generateStrategyWithBrowserLlm } from "@/lib/browserStrategyLlm";
 import { loadBrowserWorkspace, saveBrowserWorkspace } from "@/lib/browserWorkspace";
 import { accountTypeTemplates } from "@/data/accountTypeTemplates";
 import type React from "react";
@@ -1136,26 +1137,18 @@ export function XhsMasterApp() {
   }
 
   async function generateAndPersistStrategy(account: Account) {
-    const res = await fetch("/api/strategy/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ account })
-    });
-    const result = await res.json().catch(() => ({}));
-    if (!res.ok || !result?.strategy) {
-      throw new Error(result?.error || "AI 策划生成失败。");
-    }
+    const result = await generateStrategyWithBrowserLlm(account);
 
     await updateBackendAccount({
       id: account.id,
-      strategyMarkdown: result.strategy.markdown,
-      profileContent: result.strategy.agentsMdContent
+      strategyMarkdown: result.data.markdown,
+      profileContent: result.data.agentsMdContent
     });
 
     return result as {
       usedLlm: boolean;
       error?: string | null;
-      strategy: { markdown: string; positioning: string; execGuide: string; agentsMdContent: string };
+      data: { markdown: string; positioning: string; execGuide: string; agentsMdContent: string };
     };
   }
 
