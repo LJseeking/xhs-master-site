@@ -5,6 +5,7 @@ const path = require("path");
 
 const projectRoot = path.resolve(__dirname, "..");
 const envLocalPath = path.join(projectRoot, ".env.local");
+const envPath = path.join(projectRoot, ".env");
 
 const environments = {
   local: {
@@ -26,6 +27,28 @@ const environments = {
 
 const env = process.argv[2];
 
+function parseEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return {};
+  const content = fs.readFileSync(filePath, "utf8");
+  return content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#") && line.includes("="))
+    .reduce((acc, line) => {
+      const index = line.indexOf("=");
+      const key = line.slice(0, index).trim();
+      let value = line.slice(index + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      acc[key] = value;
+      return acc;
+    }, {});
+}
+
 if (!env) {
   console.log("\nxhs-master-site Environment Switcher");
   console.log("====================================\n");
@@ -45,9 +68,23 @@ if (!environments[env]) {
 
 try {
   const config = environments[env];
+  const baseEnv = parseEnvFile(envPath);
+  const passthroughKeys = [
+    "DATABASE_URL",
+    "XHS_AUTO_OP_PATH",
+    "XHS_MEMORY_PATH",
+    "XHS_MASTER_MODE",
+    "OPENAI_API_KEY",
+    "OPENAI_MODEL",
+    "OPENAI_BASE_URL"
+  ];
+  const extraLines = passthroughKeys
+    .filter((key) => typeof baseEnv[key] === "string" && baseEnv[key] !== "")
+    .map((key) => `${key}=${baseEnv[key]}`);
   const content = [
     `NEXT_PUBLIC_APP_ENVIRONMENT=${config.appEnvironment}`,
     `NEXT_PUBLIC_API_BASE_URL=${config.apiBaseUrl}`,
+    ...extraLines,
     ""
   ].join("\n");
 
