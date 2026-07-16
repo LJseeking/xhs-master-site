@@ -903,8 +903,16 @@ function mapBackendAccountToUiAccount(account: BackendAccountDetail): Account {
     taboos: account.taboos,
     profilePath: account.profilePath || "",
     assetsPath: account.assetsPath || "",
-    strategy: null,
-    profile: account.profilePath ? { content: "", version: 1, path: account.profilePath } : null,
+    strategy: account.strategyMarkdown
+      ? {
+          markdown: account.strategyMarkdown,
+          positioning: account.strategyPositioning || `${account.name}｜${account.accountType}`,
+          execGuide: account.strategyExecGuide || ""
+        }
+      : null,
+    profile: account.profilePath
+      ? { content: account.profileContent || "", version: account.profileVersion || 1, path: account.profilePath }
+      : null,
     referenceResearches: [],
     imageStyleStudies: [],
     interactionPlans: [],

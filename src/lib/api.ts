@@ -55,6 +55,11 @@ export interface BackendAccountDetail {
   profilePath: string;
   assetsPath: string;
   status: string;
+  strategyMarkdown?: string;
+  strategyPositioning?: string;
+  strategyExecGuide?: string;
+  profileContent?: string;
+  profileVersion?: number;
   createdAt: string;
   updatedAt: string;
 }
