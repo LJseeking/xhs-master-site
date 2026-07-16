@@ -26,7 +26,18 @@ import {
   Upload,
   Wand2,
 } from "lucide-react";
-import { createBackendAccount, deleteBackendAccount, fetchBackendAccounts, logout, getToken, getUser, type BackendAccountDetail, type LoginResponse } from "@/lib/api";
+import {
+  createBackendAccount,
+  fetchBackendAccountDetail,
+  deleteBackendAccount,
+  fetchBackendAccounts,
+  logout,
+  getToken,
+  getUser,
+  updateBackendAccount,
+  type BackendAccountDetail,
+  type LoginResponse
+} from "@/lib/api";
 import { loadBrowserWorkspace, saveBrowserWorkspace } from "@/lib/browserWorkspace";
 import { accountTypeTemplates } from "@/data/accountTypeTemplates";
 import type React from "react";
@@ -924,6 +935,46 @@ function mapBackendAccountToUiAccount(account: BackendAccountDetail): Account {
   };
 }
 
+function buildBackendFallbackStrategyMarkdown(account: Pick<Account, "name" | "accountType" | "businessGoals" | "contentDirections">) {
+  return `# ${account.name || "该账号"} 账号运营策划方案
+
+## 账号定位
+${account.name || "该账号"}｜${account.accountType || "通用账号"}
+
+## 目标
+${account.businessGoals || "提升收藏、咨询和转化"}
+
+## 内容方向
+${account.contentDirections || "真实素材、用户痛点、服务信息、风险边界"}
+
+## 风险边界
+只生成方案，不自动发布；价格、活动、档期、资质、案例授权等信息发布前必须人工核验。`;
+}
+
+function needsAiStrategy(account: Account) {
+  const markdown = account.strategy?.markdown?.trim();
+  if (!markdown) return true;
+  return markdown === buildBackendFallbackStrategyMarkdown(account).trim();
+}
+
+function mergeBackendAccountWithLocalState(account: Account, local?: Account): Account {
+  if (!local) return account;
+
+  return {
+    ...account,
+    referenceResearches: local.referenceResearches?.length ? local.referenceResearches : account.referenceResearches,
+    imageStyleStudies: local.imageStyleStudies?.length ? local.imageStyleStudies : account.imageStyleStudies,
+    interactionPlans: local.interactionPlans?.length ? local.interactionPlans : account.interactionPlans,
+    postReviews: local.postReviews?.length ? local.postReviews : account.postReviews,
+    expertRules: local.expertRules?.length ? local.expertRules : account.expertRules,
+    industryKnowledgeResearches: local.industryKnowledgeResearches?.length
+      ? local.industryKnowledgeResearches
+      : account.industryKnowledgeResearches,
+    assets: local.assets?.length ? local.assets : account.assets,
+    weeklyPlans: local.weeklyPlans?.length ? local.weeklyPlans : account.weeklyPlans
+  };
+}
+
 export function XhsMasterApp() {
   const localTemplates = useMemo(() => buildLocalTemplates(), []);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -995,7 +1046,10 @@ export function XhsMasterApp() {
         const backendAccounts = await fetchBackendAccounts().catch(() => []);
         if (!backendAccounts.length) return;
 
-        const mappedAccounts = backendAccounts.map(mapBackendAccountToUiAccount);
+        const localAccountMap = new Map((((snapshot.accounts as Account[]) || [])).map((account) => [account.id, account]));
+        const mappedAccounts = backendAccounts.map((account) =>
+          mergeBackendAccountWithLocalState(mapBackendAccountToUiAccount(account), localAccountMap.get(account.id))
+        );
         setAccounts(mappedAccounts);
         if (!snapshot?.selectedId && mappedAccounts[0]) {
           setSelectedId(mappedAccounts[0].id);
@@ -1052,12 +1106,16 @@ export function XhsMasterApp() {
   async function refresh() {
     const snapshot = await loadBrowserWorkspace();
     const nextTemplates = (snapshot.templates as Template[])?.length ? (snapshot.templates as Template[]) : localTemplates;
-    let nextAccounts = (snapshot.accounts as Account[]) || [];
+    const localAccounts = (snapshot.accounts as Account[]) || [];
+    let nextAccounts = localAccounts;
 
     if (getToken()) {
       const backendAccounts = await fetchBackendAccounts().catch(() => []);
       if (backendAccounts.length) {
-        nextAccounts = backendAccounts.map(mapBackendAccountToUiAccount);
+        const localAccountMap = new Map(localAccounts.map((account) => [account.id, account]));
+        nextAccounts = backendAccounts.map((account) =>
+          mergeBackendAccountWithLocalState(mapBackendAccountToUiAccount(account), localAccountMap.get(account.id))
+        );
       }
     }
 
@@ -1065,6 +1123,7 @@ export function XhsMasterApp() {
     setTemplates(nextTemplates);
     if (!selectedId && nextAccounts[0]) setSelectedId(nextAccounts[0].id);
     if (nextTemplates?.length) setAccountForm((current) => (current.accountType ? current : emptyAccountForm(nextTemplates)));
+    return nextAccounts;
   }
 
   function replaceAccount(nextAccount: Account) {
@@ -1076,16 +1135,48 @@ export function XhsMasterApp() {
     setAccounts((current) => current.map((account) => (account.id === selected.id ? mutator(account) : account)));
   }
 
+  async function generateAndPersistStrategy(account: Account) {
+    const res = await fetch("/api/strategy/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ account })
+    });
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok || !result?.strategy) {
+      throw new Error(result?.error || "AI 策划生成失败。");
+    }
+
+    await updateBackendAccount({
+      id: account.id,
+      strategyMarkdown: result.strategy.markdown,
+      profileContent: result.strategy.agentsMdContent
+    });
+
+    return result as {
+      usedLlm: boolean;
+      error?: string | null;
+      strategy: { markdown: string; positioning: string; execGuide: string; agentsMdContent: string };
+    };
+  }
+
   async function createAccount() {
     setLoading(true);
     try {
       const payload = hydrateAccountForm(accountForm, templates, accounts.length);
       const created = await createBackendAccount(payload);
-      await refresh();
-      setSelectedId(created?.id ?? null);
+      const createdDetail = await fetchBackendAccountDetail(created.id);
+      const createdAccount = mapBackendAccountToUiAccount(createdDetail);
+      const strategyResult = await generateAndPersistStrategy(createdAccount);
+      const nextAccounts = await refresh();
+      const persistedAccount = nextAccounts.find((account) => account.id === created.id) ?? createdAccount;
+
+      setSelectedId(created.id);
       setActiveTab("strategy");
       setAccountForm(emptyAccountForm(templates));
-      showToast("账号已创建并保存到后端。");
+      if (persistedAccount.profile?.content) {
+        setProfileContent(persistedAccount.profile.content);
+      }
+      showToast(strategyResult.usedLlm ? "账号已创建，AI 策划案已生成并保存到后端。" : strategyResult.error || "账号已创建，并已保存默认策划案。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "创建失败");
     } finally {

@@ -230,6 +230,19 @@ export async function fetchBackendAccounts(): Promise<BackendAccountDetail[]> {
   return details;
 }
 
+export async function fetchBackendAccountDetail(id: number): Promise<BackendAccountDetail> {
+  const detailRes = await authRequest<BackendAccountDetail>("/account/v1/detail", {
+    method: "POST",
+    body: { id }
+  });
+
+  if (!detailRes.status || !detailRes.data) {
+    throw new Error(detailRes.message || "获取账号详情失败");
+  }
+
+  return detailRes.data;
+}
+
 export async function createBackendAccount(body: Record<string, unknown>) {
   const res = await authRequest<{ id: number }>("/account/v1/create", {
     method: "POST",
@@ -248,6 +261,17 @@ export async function deleteBackendAccount(id: number) {
   });
   if (!res.status) {
     throw new Error(res.message || "删除账号失败");
+  }
+  return res.data;
+}
+
+export async function updateBackendAccount(body: Record<string, unknown>) {
+  const res = await authRequest("/account/v1/update", {
+    method: "POST",
+    body
+  });
+  if (!res.status) {
+    throw new Error(res.message || "更新账号失败");
   }
   return res.data;
 }
