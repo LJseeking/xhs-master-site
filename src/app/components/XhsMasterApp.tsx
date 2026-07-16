@@ -38,9 +38,10 @@ import {
   type BackendAccountDetail,
   type LoginResponse
 } from "@/lib/api";
-import { generateStrategyWithBrowserLlm } from "@/lib/browserStrategyLlm";
+import { generateStrategyWithBrowserLlm, generateWeeklyTasksWithBrowserLlm } from "@/lib/browserStrategyLlm";
 import { loadBrowserWorkspace, saveBrowserWorkspace } from "@/lib/browserWorkspace";
 import { accountTypeTemplates } from "@/data/accountTypeTemplates";
+import { buildNoteTasks } from "@/lib/weeklyPlan";
 import type React from "react";
 import clsx from "clsx";
 
@@ -1317,20 +1318,51 @@ export function XhsMasterApp() {
     setLoading(true);
     showToast("正在生成一周计划...");
     try {
-      const res = await fetch("/api/weekly-plans/generate", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...payload, account: selected })
+      const plan = {
+        id: Date.now(),
+        accountId: selected.id,
+        weekStart: String(payload.weekStart || new Date().toISOString().slice(0, 10)),
+        theme: String(payload.theme || "本周主题"),
+        goal: String(payload.goal || "验证内容方向并积累可复用素材"),
+        frequency: Number(payload.frequency || 5),
+        testHypothesis: String(payload.testHypothesis || ""),
+        commercializationMove: String(payload.commercializationMove || ""),
+        interactionGoal: String(payload.interactionGoal || ""),
+        availableAssets: String(payload.availableAssets || ""),
+        taboos: String(payload.taboos || ""),
+        noteTasks: []
+      };
+      const weeklyInput = {
+        theme: plan.theme,
+        goal: plan.goal,
+        frequency: plan.frequency,
+        ratio: String(payload.ratio || ""),
+        testHypothesis: plan.testHypothesis,
+        commercializationMove: plan.commercializationMove,
+        interactionGoal: plan.interactionGoal,
+        availableAssets: plan.availableAssets,
+        taboos: plan.taboos
+      };
+      const fallbackTasks = buildNoteTasks(selected as never, (selected.strategy as never) || null, (selected.assets || []) as never, weeklyInput, plan as never);
+      const llmResult = await generateWeeklyTasksWithBrowserLlm({
+        account: selected,
+        strategy: selected.strategy || null,
+        assets: selected.assets || [],
+        weeklyPlan: { id: plan.id },
+        weeklyInput,
+        fallbackTasks
       });
-      const plan = await res.json();
-      if (!res.ok) throw new Error(plan.error || "生成计划失败。");
+      const nextPlan = {
+        ...plan,
+        noteTasks: llmResult.data.map((task, index) => ({ ...task, id: Date.now() + index }))
+      };
       updateSelectedAccount((account) => ({
         ...account,
-        weeklyPlans: [plan, ...(account.weeklyPlans || [])]
+        weeklyPlans: [nextPlan, ...(account.weeklyPlans || [])]
       }));
-      setSelectedNoteId(plan.noteTasks?.[0]?.id ?? null);
+      setSelectedNoteId(nextPlan.noteTasks?.[0]?.id ?? null);
       setActiveTab("prompts");
-      showToast("本周内容计划已生成。");
+      showToast(llmResult.usedLlm ? "本周内容计划已生成。" : llmResult.error || "已使用默认模板生成本周内容计划。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "生成计划失败。");
     } finally {

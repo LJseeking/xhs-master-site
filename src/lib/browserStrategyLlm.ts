@@ -29,6 +29,37 @@ type StrategyResponse = {
   execGuide: string;
 };
 
+type WeeklyTaskSeed = {
+  accountId: number;
+  weeklyPlanId: number;
+  publishAt: string;
+  contentType: string;
+  contentGoal: string;
+  topicTitle: string;
+  targetUser: string;
+  painPoint: string;
+  coreView: string;
+  bodyStructure: string;
+  requiredImages: string;
+  recommendedAssets: string;
+  coverCopyDirection: string;
+  commentHook: string;
+  expectedGoal: string;
+  status: string;
+};
+
+type WeeklyPlanInput = {
+  theme: string;
+  goal: string;
+  frequency: number;
+  ratio: string;
+  testHypothesis: string;
+  commercializationMove: string;
+  interactionGoal: string;
+  availableAssets: string;
+  taboos: string;
+};
+
 function getBrowserLlmStatus() {
   return {
     enabled: Boolean(process.env.NEXT_PUBLIC_OPENAI_API_KEY),
@@ -68,6 +99,10 @@ function safeJson(text: string) {
   } catch {
     return {};
   }
+}
+
+function stringFrom(value: unknown, fallback: string) {
+  return typeof value === "string" && value.trim() ? value : fallback;
 }
 
 function extractText(json: unknown) {
@@ -310,6 +345,114 @@ JSON 字段：
       usedLlm: false,
       data: fallback,
       error: error instanceof Error ? error.message : "浏览器端 AI 调用失败。"
+    };
+  }
+}
+
+export async function generateWeeklyTasksWithBrowserLlm(input: {
+  account: ClientAccountInput & { strategy?: unknown | null; assets?: unknown[] };
+  strategy: unknown | null;
+  assets: unknown[];
+  weeklyPlan: { id: number };
+  weeklyInput: WeeklyPlanInput;
+  fallbackTasks: WeeklyTaskSeed[];
+}): Promise<{
+  usedLlm: boolean;
+  error?: string;
+  data: WeeklyTaskSeed[];
+}> {
+  const status = getBrowserLlmStatus();
+  if (!status.enabled) {
+    return { usedLlm: false, data: input.fallbackTasks, error: "NEXT_PUBLIC_OPENAI_API_KEY 未配置，已使用内置模板生成。" };
+  }
+
+  const prompt = `请根据账号策略、本周目标和素材情况，生成一周小红书 note_tasks。
+
+要求：
+- 生成 ${input.fallbackTasks.length} 篇。
+- 当前执行模式是只生成计划、Prompt 和命令建议，不允许真实发布或互动。
+- 每篇任务必须具体到用户痛点、核心观点、正文结构、图片要求、评论区钩子。
+- 推荐素材只能来自输入素材或明确写“素材缺口”，禁止伪造真实素材。
+- 只返回 JSON，不要 Markdown 代码块。
+
+输入：
+${JSON.stringify(
+    {
+      account: input.account,
+      strategy: input.strategy,
+      assets: input.assets,
+      weeklyPlan: input.weeklyPlan,
+      weeklyInput: input.weeklyInput,
+      fallbackTasks: input.fallbackTasks
+    },
+    null,
+    2
+  )}
+
+JSON 字段：
+{
+  "tasks": [
+    {
+      "publishAt": "YYYY-MM-DD HH:mm",
+      "contentType": "图文笔记/视频脚本/教程清单等",
+      "contentGoal": "",
+      "topicTitle": "",
+      "targetUser": "",
+      "painPoint": "",
+      "coreView": "",
+      "bodyStructure": "",
+      "requiredImages": "",
+      "recommendedAssets": "",
+      "coverCopyDirection": "",
+      "commentHook": "",
+      "expectedGoal": "",
+      "status": "待生成Prompt"
+    }
+  ]
+}`;
+
+  try {
+    const text = await createTextResponse({
+      instructions: "你是小红书周运营计划专家，擅长把账号定位、素材条件和测试假设拆成可执行 note_tasks。",
+      input: prompt
+    });
+    const parsed = extractJson(text);
+    const rawTasks = parsed && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).tasks)
+      ? ((parsed as Record<string, unknown>).tasks as Array<Record<string, unknown>>)
+      : [];
+
+    if (!rawTasks.length) {
+      return { usedLlm: false, data: input.fallbackTasks, error: "大模型未返回 tasks 数组，已使用内置模板。" };
+    }
+
+    const tasks = rawTasks.slice(0, input.fallbackTasks.length).map((task, index) => {
+      const fallback = input.fallbackTasks[index] ?? input.fallbackTasks[0];
+      return {
+        accountId: input.account.id || fallback.accountId,
+        weeklyPlanId: input.weeklyPlan.id,
+        publishAt: stringFrom(task.publishAt, fallback.publishAt),
+        contentType: stringFrom(task.contentType, fallback.contentType),
+        contentGoal: stringFrom(task.contentGoal, fallback.contentGoal),
+        topicTitle: stringFrom(task.topicTitle, fallback.topicTitle),
+        targetUser: stringFrom(task.targetUser, fallback.targetUser),
+        painPoint: stringFrom(task.painPoint, fallback.painPoint),
+        coreView: stringFrom(task.coreView, fallback.coreView),
+        bodyStructure: stringFrom(task.bodyStructure, fallback.bodyStructure),
+        requiredImages: stringFrom(task.requiredImages, fallback.requiredImages),
+        recommendedAssets: stringFrom(task.recommendedAssets, fallback.recommendedAssets),
+        coverCopyDirection: stringFrom(task.coverCopyDirection, fallback.coverCopyDirection),
+        commentHook: stringFrom(task.commentHook, fallback.commentHook),
+        expectedGoal: stringFrom(task.expectedGoal, fallback.expectedGoal),
+        status: "待生成Prompt"
+      };
+    });
+
+    return { usedLlm: true, data: tasks };
+  } catch (error) {
+    return {
+      usedLlm: false,
+      data: input.fallbackTasks,
+      error: error instanceof Error ? error.message : "浏览器端一周计划生成失败。"
     };
   }
 }
