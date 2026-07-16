@@ -26,7 +26,9 @@ import {
   Upload,
   Wand2,
 } from "lucide-react";
-import { logout, getToken, getUser, type LoginResponse } from "@/lib/api";
+import { createBackendAccount, deleteBackendAccount, fetchBackendAccounts, logout, getToken, getUser, type BackendAccountDetail, type LoginResponse } from "@/lib/api";
+import { loadBrowserWorkspace, saveBrowserWorkspace } from "@/lib/browserWorkspace";
+import { accountTypeTemplates } from "@/data/accountTypeTemplates";
 import type React from "react";
 import clsx from "clsx";
 
@@ -807,7 +809,115 @@ function hydrateAccountForm(form: ReturnType<typeof emptyAccountForm>, templates
   };
 }
 
+function buildLocalTemplates(): Template[] {
+  return accountTypeTemplates.map((template, index) => ({
+    id: index + 1,
+    typeKey: template.typeKey,
+    name: template.name,
+    defaultColumns: JSON.stringify(template.defaultColumns),
+    weeklyRatio: JSON.stringify(template.weeklyRatio)
+  }));
+}
+
+function createClientId() {
+  return Date.now() + Math.floor(Math.random() * 10000);
+}
+
+function slugifyClientName(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
+    .replace(/^-+|-+$/g, "") || `account-${createClientId()}`;
+}
+
+function buildLocalAccount(
+  form: ReturnType<typeof hydrateAccountForm>,
+  templates: Template[],
+  count: number
+): Account {
+  const id = createClientId();
+  const template = templates.find((item) => item.typeKey === form.accountType);
+  const slug = slugifyClientName(form.name || `account-${count + 1}`);
+  const profilePath = `profiles/${slug}/AGENTS.md`;
+  const assetsPath = `assets/${slug}`;
+  const typeName = template?.name || form.accountType;
+  const positioning = `${form.name}｜${typeName}`;
+  const profileContent = `# ${form.name} AGENTS\n\n- 账号类型：${typeName}\n- 账号参数：${form.accountParam}\n- 城市：${form.city || "待补充"}\n- 用户：${form.targetUsers}\n- 痛点：${form.painPoints}\n- 方向：${form.contentDirections}\n- 禁忌：${form.taboos}\n`;
+
+  return {
+    id,
+    name: form.name,
+    accountParam: form.accountParam,
+    accountType: form.accountType,
+    stage: form.stage,
+    personaBase: form.personaBase,
+    city: form.city,
+    targetUsers: form.targetUsers,
+    painPoints: form.painPoints,
+    contentDirections: form.contentDirections,
+    businessGoals: form.businessGoals,
+    monetization: form.monetization,
+    referenceAccounts: form.referenceAccounts,
+    materialCondition: form.materialCondition,
+    taboos: form.taboos,
+    profilePath,
+    assetsPath,
+    strategy: {
+      markdown: `# ${form.name} 策划案\n\n- 账号定位：${positioning}\n- 目标：${form.businessGoals}\n- 变现：${form.monetization}\n`,
+      positioning,
+      execGuide: "浏览器本地模式：只生成方案，不自动发布。"
+    },
+    profile: {
+      content: profileContent,
+      version: 1,
+      path: profilePath
+    },
+    referenceResearches: [],
+    imageStyleStudies: [],
+    interactionPlans: [],
+    postReviews: [],
+    expertRules: [],
+    industryKnowledgeResearches: [],
+    assets: [],
+    weeklyPlans: []
+  };
+}
+
+function mapBackendAccountToUiAccount(account: BackendAccountDetail): Account {
+  return {
+    id: account.id,
+    name: account.name,
+    accountParam: account.accountParam,
+    accountType: account.accountType,
+    stage: account.stage,
+    personaBase: account.personaBase,
+    city: account.city,
+    targetUsers: account.targetUsers,
+    painPoints: account.painPoints,
+    contentDirections: account.contentDirections,
+    businessGoals: account.businessGoals,
+    monetization: account.monetization,
+    referenceAccounts: account.referenceAccounts,
+    materialCondition: account.materialCondition,
+    taboos: account.taboos,
+    profilePath: account.profilePath || "",
+    assetsPath: account.assetsPath || "",
+    strategy: null,
+    profile: account.profilePath ? { content: "", version: 1, path: account.profilePath } : null,
+    referenceResearches: [],
+    imageStyleStudies: [],
+    interactionPlans: [],
+    postReviews: [],
+    expertRules: [],
+    industryKnowledgeResearches: [],
+    assets: [],
+    weeklyPlans: []
+  };
+}
+
 export function XhsMasterApp() {
+  const localTemplates = useMemo(() => buildLocalTemplates(), []);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -848,6 +958,7 @@ export function XhsMasterApp() {
     commands?: Array<{ category: string; command: string; description: string; safetyNote: string }>;
     researchPrompt?: string;
   }>({});
+  const [browserReady, setBrowserReady] = useState(false);
 
   const selected = useMemo(() => accounts.find((account) => account.id === selectedId) ?? accounts[0], [accounts, selectedId]);
   const latestPlan = selected?.weeklyPlans?.[0];
@@ -855,10 +966,70 @@ export function XhsMasterApp() {
 
   useEffect(() => {
     setCurrentUser(getUser());
-    refresh().catch((error) => {
-      showToast(error instanceof Error ? error.message : "加载账号列表失败。");
+    setTemplates(localTemplates);
+    loadBrowserWorkspace()
+      .then((snapshot) => {
+        setAccounts((snapshot.accounts as Account[]) || []);
+        setTemplates((snapshot.templates as Template[])?.length ? (snapshot.templates as Template[]) : localTemplates);
+        setSelectedId(typeof snapshot.selectedId === "number" ? snapshot.selectedId : null);
+        setPromptResults((snapshot.promptResults as Record<number, PromptResult>) || {});
+        setImagePromptResults((snapshot.imagePromptResults as Record<number, ImagePromptResult>) || {});
+        setBatchImagePostResults((snapshot.batchImagePostResults as Record<number, BatchImagePostsResult>) || {});
+        setReferenceDraft((snapshot.referenceDraft as typeof referenceDraft) || {});
+        setImageStyleDraft((snapshot.imageStyleDraft as typeof imageStyleDraft) || {});
+        setInteractionDraft((snapshot.interactionDraft as typeof interactionDraft) || {});
+        setPostReviewPrompt(snapshot.postReviewPrompt || "");
+        setIndustryLearningDraft((snapshot.industryLearningDraft as typeof industryLearningDraft) || {});
+        return snapshot;
+      })
+      .then(async (snapshot) => {
+        if (!getToken()) return;
+        const backendAccounts = await fetchBackendAccounts().catch(() => []);
+        if (!backendAccounts.length) return;
+
+        const mappedAccounts = backendAccounts.map(mapBackendAccountToUiAccount);
+        setAccounts(mappedAccounts);
+        if (!snapshot?.selectedId && mappedAccounts[0]) {
+          setSelectedId(mappedAccounts[0].id);
+        }
+      })
+      .catch((error) => {
+        showToast(error instanceof Error ? error.message : "加载账号列表失败。");
+      })
+      .finally(() => setBrowserReady(true));
+  }, [localTemplates]);
+
+  useEffect(() => {
+    if (!browserReady) return;
+    saveBrowserWorkspace({
+      accounts,
+      templates,
+      selectedId,
+      promptResults,
+      imagePromptResults,
+      batchImagePostResults,
+      referenceDraft,
+      imageStyleDraft,
+      interactionDraft,
+      postReviewPrompt,
+      industryLearningDraft
+    }).catch(() => {
+      // 浏览器数据库写失败时不打断当前操作，仅在后续用户动作中继续使用内存态。
     });
-  }, []);
+  }, [
+    browserReady,
+    accounts,
+    templates,
+    selectedId,
+    promptResults,
+    imagePromptResults,
+    batchImagePostResults,
+    referenceDraft,
+    imageStyleDraft,
+    interactionDraft,
+    postReviewPrompt,
+    industryLearningDraft
+  ]);
 
   useEffect(() => {
     if (templates.length && !accountForm.accountType) setAccountForm(emptyAccountForm(templates));
@@ -871,34 +1042,42 @@ export function XhsMasterApp() {
   }, [selected, selectedId, latestPlan, selectedNoteId]);
 
   async function refresh() {
-    const res = await fetch("/api/accounts", { cache: "no-store" });
-    const data = await readJsonResponse<{ accounts: Account[]; templates: Template[]; error?: string }>(
-      res,
-      { accounts: [], templates: [] }
-    );
-    if (!res.ok) throw new Error(data.error || "加载账号列表失败。");
-    setAccounts(data.accounts);
-    setTemplates(data.templates);
-    if (!selectedId && data.accounts[0]) setSelectedId(data.accounts[0].id);
-    if (data.templates?.length) setAccountForm((current) => (current.accountType ? current : emptyAccountForm(data.templates)));
+    const snapshot = await loadBrowserWorkspace();
+    const nextTemplates = (snapshot.templates as Template[])?.length ? (snapshot.templates as Template[]) : localTemplates;
+    let nextAccounts = (snapshot.accounts as Account[]) || [];
+
+    if (getToken()) {
+      const backendAccounts = await fetchBackendAccounts().catch(() => []);
+      if (backendAccounts.length) {
+        nextAccounts = backendAccounts.map(mapBackendAccountToUiAccount);
+      }
+    }
+
+    setAccounts(nextAccounts);
+    setTemplates(nextTemplates);
+    if (!selectedId && nextAccounts[0]) setSelectedId(nextAccounts[0].id);
+    if (nextTemplates?.length) setAccountForm((current) => (current.accountType ? current : emptyAccountForm(nextTemplates)));
+  }
+
+  function replaceAccount(nextAccount: Account) {
+    setAccounts((current) => current.map((account) => (account.id === nextAccount.id ? nextAccount : account)));
+  }
+
+  function updateSelectedAccount(mutator: (account: Account) => Account) {
+    if (!selected) return;
+    setAccounts((current) => current.map((account) => (account.id === selected.id ? mutator(account) : account)));
   }
 
   async function createAccount() {
     setLoading(true);
     try {
       const payload = hydrateAccountForm(accountForm, templates, accounts.length);
-      const res = await fetch("/api/accounts", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await readJsonResponse<{ id?: number; error?: string }>(res, {});
-      if (!res.ok) throw new Error(data.error || "创建失败");
+      const created = await createBackendAccount(payload);
       await refresh();
-      setSelectedId(typeof data.id === "number" ? data.id : null);
+      setSelectedId(created?.id ?? null);
       setActiveTab("strategy");
       setAccountForm(emptyAccountForm(templates));
-      showToast("账号、策划案和配置文件已生成。");
+      showToast("账号已创建并保存到后端。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "创建失败");
     } finally {
@@ -915,10 +1094,11 @@ export function XhsMasterApp() {
 
     setLoading(true);
     try {
-      const res = await fetch(`/api/accounts/${selected.id}`, { method: "DELETE" });
-      const data = await readJsonResponse<{ nextAccountId?: number | null; note?: string; error?: string }>(res, {});
-      if (!res.ok) throw new Error(data.error || "删除账号失败。");
-      setSelectedId(data.nextAccountId ?? null);
+      await deleteBackendAccount(selected.id);
+      const remaining = accounts.filter((account) => account.id !== selected.id);
+      const nextAccountId = remaining[0]?.id ?? null;
+      await refresh();
+      setSelectedId(nextAccountId);
       setSelectedNoteId(null);
       setPromptResults({});
       setReferenceDraft({});
@@ -926,9 +1106,8 @@ export function XhsMasterApp() {
       setInteractionDraft({});
       setPostReviewPrompt("");
       setIndustryLearningDraft({});
-      await refresh();
-      setActiveTab(data.nextAccountId ? "dashboard" : "accounts");
-      showToast(data.note || "账号已删除。");
+      setActiveTab(nextAccountId ? "dashboard" : "accounts");
+      showToast("账号已从后端删除。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "删除账号失败。");
     } finally {
@@ -939,14 +1118,14 @@ export function XhsMasterApp() {
   async function saveProfile() {
     if (!selected) return;
     setLoading(true);
-    await fetch(`/api/accounts/${selected.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ profileContent })
-    });
-    await refresh();
+    updateSelectedAccount((account) => ({
+      ...account,
+      profile: account.profile
+        ? { ...account.profile, content: profileContent, version: (account.profile.version || 0) + 1 }
+        : { content: profileContent, version: 1, path: account.profilePath }
+    }));
     setLoading(false);
-    showToast("配置文件已保存。");
+    showToast("配置文件已保存到浏览器。");
   }
 
   async function uploadAsset(form: HTMLFormElement) {
@@ -972,9 +1151,14 @@ export function XhsMasterApp() {
       body: data
     });
     if (res.ok) {
-      const result = await res.json().catch(() => ({ count: 1 }));
+      const result = await res.json().catch(() => ({ count: 1, assets: [] }));
       form.reset();
-      await refresh();
+      if (Array.isArray(result.assets?.length ? result.assets : result.assets)) {
+        updateSelectedAccount((account) => ({
+          ...account,
+          assets: [...(result.assets || []), ...account.assets]
+        }));
+      }
       showToast(`已上传 ${result.count || 1} 个素材，并同步了可访问 URL。`);
     } else {
       const result = await res.json().catch(() => ({ error: "上传失败。" }));
@@ -992,11 +1176,18 @@ export function XhsMasterApp() {
       const res = await fetch("/api/assets/import-folder", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...payload, accountId: selected.id })
+        body: JSON.stringify({
+          ...payload,
+          existingFilePaths: selected.assets.map((asset) => asset.filePath)
+        })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "批量导入素材失败。");
-      await refresh();
+      updateSelectedAccount((account) => ({
+        ...account,
+        assetsPath: data.folderPath || account.assetsPath,
+        assets: [...(data.assets || []), ...account.assets]
+      }));
       showToast(`已批量导入 ${data.imported} 个素材，跳过 ${data.skipped} 个已存在文件。`);
     } catch (error) {
       showToast(error instanceof Error ? error.message : "批量导入素材失败。");
@@ -1010,7 +1201,7 @@ export function XhsMasterApp() {
     const res = await fetch("/api/assets/manifest", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ accountId: selected.id })
+      body: JSON.stringify({ account: selected, assets: selected.assets })
     });
     const data = await res.json();
     setManifest(data);
@@ -1037,11 +1228,14 @@ export function XhsMasterApp() {
       const res = await fetch("/api/weekly-plans/generate", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...payload, accountId: selected.id })
+        body: JSON.stringify({ ...payload, account: selected })
       });
       const plan = await res.json();
       if (!res.ok) throw new Error(plan.error || "生成计划失败。");
-      await refresh();
+      updateSelectedAccount((account) => ({
+        ...account,
+        weeklyPlans: [plan, ...(account.weeklyPlans || [])]
+      }));
       setSelectedNoteId(plan.noteTasks?.[0]?.id ?? null);
       setActiveTab("prompts");
       showToast("本周内容计划已生成。");
@@ -1205,22 +1399,38 @@ export function XhsMasterApp() {
   }
 
   async function generatePrompt(task: NoteTask) {
+    if (!selected || !latestPlan) return;
     setLoading(true);
-    const res = await fetch(`/api/note-tasks/${task.id}/prompt`, { method: "POST" });
+    const res = await fetch(`/api/note-tasks/${task.id}/prompt`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ account: selected, noteTask: task, weeklyPlan: latestPlan })
+    });
     const data = await res.json();
     setPromptResults((current) => ({ ...current, [task.id]: data }));
-    await refresh();
+    updateSelectedAccount((account) => ({
+      ...account,
+      weeklyPlans: account.weeklyPlans.map((plan) =>
+        plan.id !== latestPlan.id
+          ? plan
+          : {
+              ...plan,
+              noteTasks: plan.noteTasks.map((item) => (item.id === task.id ? { ...item, status: "已生成Prompt" } : item))
+            }
+      )
+    }));
     setLoading(false);
     showToast("正文草稿和执行命令已生成。");
   }
 
   async function generateImagePrompt(task: NoteTask, options?: SingleImagePromptOptions) {
+    if (!selected) return;
     setLoading(true);
     try {
       const res = await fetch(`/api/note-tasks/${task.id}/image-prompt`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(options || {})
+        body: JSON.stringify({ ...(options || {}), account: selected, noteTask: task })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "生成图片方案失败。");
@@ -1256,17 +1466,16 @@ export function XhsMasterApp() {
   async function saveDraft(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedNote) return;
-    const form = new FormData(event.currentTarget);
-    const payload = Object.fromEntries(form.entries());
     setLoading(true);
-    await fetch("/api/drafts", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...payload, noteTaskId: selectedNote.id })
-    });
-    await refresh();
+    updateSelectedAccount((account) => ({
+      ...account,
+      weeklyPlans: account.weeklyPlans.map((plan) => ({
+        ...plan,
+        noteTasks: plan.noteTasks.map((task) => (task.id === selectedNote.id ? { ...task, status: "已保存草稿" } : task))
+      }))
+    }));
     setLoading(false);
-    showToast("草稿结果已保存。");
+    showToast("草稿状态已保存到浏览器。");
   }
 
   async function generatePostReview(event: React.FormEvent<HTMLFormElement>) {

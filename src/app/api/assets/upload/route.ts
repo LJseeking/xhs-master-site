@@ -1,6 +1,5 @@
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { getBackendApiBaseUrl } from "@/lib/backendApi";
 
 const API_BASE_URL = getBackendApiBaseUrl();
@@ -129,14 +128,10 @@ async function uploadToSignedUrl(file: File, signedUrl: string) {
 export async function POST(request: Request) {
   try {
     const form = await request.formData();
-    const accountId = Number(form.get("accountId"));
     const files = [...form.getAll("files"), ...form.getAll("file")].filter((item): item is File => item instanceof File);
-    if (!accountId || !files.length) {
-      return NextResponse.json({ error: "缺少 accountId 或图片文件" }, { status: 400 });
+    if (!files.length) {
+      return NextResponse.json({ error: "缺少图片文件" }, { status: 400 });
     }
-
-    const account = await prisma.account.findUnique({ where: { id: accountId } });
-    if (!account) return NextResponse.json({ error: "账号不存在" }, { status: 404 });
 
     const assets = [];
     const signedUploads =
@@ -154,22 +149,20 @@ export async function POST(request: Request) {
       const signed = signedUploads[index];
       await uploadToSignedUrl(file, signed.signedUrl);
 
-      const asset = await prisma.asset.create({
-        data: {
-          accountId,
-          filePath: signed.file || file.name,
-          fileUrl: signed.url,
-          fileType: file.type || "application/octet-stream",
-          sourceType: String(form.get("sourceType") || "真实素材"),
-          location: String(form.get("location") || ""),
-          shotAt: String(form.get("shotAt") || ""),
-          tags: String(form.get("tags") || ""),
-          suitableTypes: String(form.get("suitableTypes") || ""),
-          coverReady: form.get("coverReady") === "true",
-          authorizationState: String(form.get("authorizationState") || "待确认"),
-          riskNotes: String(form.get("riskNotes") || "")
-        }
-      });
+      const asset = {
+        id: Date.now() + index,
+        filePath: signed.file || file.name,
+        localFilePath: signed.file || file.name,
+        fileUrl: signed.url,
+        fileType: file.type || "application/octet-stream",
+        sourceType: String(form.get("sourceType") || "真实素材"),
+        tags: String(form.get("tags") || ""),
+        suitableTypes: String(form.get("suitableTypes") || ""),
+        coverReady: form.get("coverReady") === "true",
+        used: false,
+        authorizationState: String(form.get("authorizationState") || "待确认"),
+        riskNotes: String(form.get("riskNotes") || "")
+      };
       assets.push(asset);
     }
 

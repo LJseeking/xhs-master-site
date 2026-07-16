@@ -1,18 +1,17 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { assetManifestMarkdown } from "@/lib/markdown";
 
 export async function POST(request: Request) {
-  const { accountId } = await request.json();
-  const account = await prisma.account.findUnique({ where: { id: Number(accountId) } });
+  const { account, assets } = await request.json();
   if (!account) return NextResponse.json({ error: "账号不存在" }, { status: 404 });
-  const assets = await prisma.asset.findMany({ where: { accountId: account.id }, orderBy: { createdAt: "desc" } });
   const content = assetManifestMarkdown(account, assets);
   const filePath = path.join(account.assetsPath, "manifest.md");
   await fs.writeFile(filePath, content, "utf8");
-  const missingAuth = assets.filter((asset) => asset.authorizationState === "待确认").length;
+  const missingAuth = (Array.isArray(assets) ? assets : []).filter(
+    (asset: { authorizationState?: string }) => asset.authorizationState === "待确认"
+  ).length;
   return NextResponse.json({
     path: filePath,
     content,

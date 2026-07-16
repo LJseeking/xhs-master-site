@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { accountVisualMode, buildCompactImageStyleBrief, buildImagePrompt, buildImageStyleStudy, isWeddingAccount } from "@/lib/imagePrompts";
 import { styleBriefFromStudy } from "@/lib/imageStyleStudy";
 import { slugifyAccountName } from "@/lib/fsPaths";
@@ -95,32 +94,21 @@ export async function POST(request: Request, context: { params: { id: string } }
   const noteContent = String(body.noteContent || "");
   const singleGoal = String(body.singleGoal || "");
   const imageCount = String(body.imageCount || "");
+  const noteTask = body.noteTask;
+  const account = body.account;
+  if (!noteTask || !account) return NextResponse.json({ error: "缺少任务上下文" }, { status: 400 });
 
-  const noteTask = await prisma.noteTask.findUnique({
-    where: { id },
-    include: {
-      account: {
-        include: {
-          imageStyleStudies: { orderBy: { createdAt: "desc" }, take: 1 },
-          referenceResearches: { orderBy: { createdAt: "desc" }, take: 1 },
-          expertRules: { orderBy: { createdAt: "desc" }, take: 12 }
-        }
-      }
-    }
-  });
-  if (!noteTask) return NextResponse.json({ error: "任务不存在" }, { status: 404 });
-
-  const latestReference = noteTask.account.referenceResearches?.[0];
-  const latestImageStudy = noteTask.account.imageStyleStudies?.[0];
-  const imageStyleStudy = latestImageStudy?.summaryMarkdown || buildImageStyleStudy(noteTask.account, latestReference);
+  const latestReference = account.referenceResearches?.[0];
+  const latestImageStudy = account.imageStyleStudies?.[0];
+  const imageStyleStudy = latestImageStudy?.summaryMarkdown || buildImageStyleStudy(account, latestReference);
   const styleBrief = styleBriefFromStudy(latestImageStudy);
-  const fallbackBrief = buildCompactImageStyleBrief(noteTask.account, latestReference);
+  const fallbackBrief = buildCompactImageStyleBrief(account, latestReference);
 
-  const promptDir = path.join(process.cwd(), "prompts", slugifyAccountName(noteTask.account.name));
+  const promptDir = path.join(process.cwd(), "prompts", slugifyAccountName(account.name));
   await fs.mkdir(promptDir, { recursive: true });
-  const imagePromptFile = path.join("prompts", slugifyAccountName(noteTask.account.name), `note-${noteTask.id}-image.md`);
+  const imagePromptFile = path.join("prompts", slugifyAccountName(account.name), `note-${noteTask.id}-image.md`);
   const content = buildImagePrompt({
-    account: noteTask.account,
+    account,
     noteTask,
     styleBrief: styleBrief.length ? styleBrief : fallbackBrief,
     openclawAssetsDir,
@@ -129,13 +117,13 @@ export async function POST(request: Request, context: { params: { id: string } }
     noteContent,
     singleGoal,
     imageCount,
-    expertRules: formatExpertRulesForPrompt(noteTask.account.expertRules)
+    expertRules: formatExpertRulesForPrompt(account.expertRules || [])
   });
   await fs.writeFile(path.join(process.cwd(), imagePromptFile), content, "utf8");
 
   const base = "uv run xiaohongshu_auto_op";
-  const accountFlag = `--account ${q(noteTask.account.accountParam)}`;
-  const copy = commandCopy(noteTask.account);
+  const accountFlag = `--account ${q(account.accountParam)}`;
+  const copy = commandCopy(account);
   const imageSource = openclawAssetsDir || copy.source;
   const commands =
     imageSourceMode === "ai_generate"
@@ -151,7 +139,7 @@ export async function POST(request: Request, context: { params: { id: string } }
         ? [
             {
               category: "用指定图片生成单篇方案",
-              command: `${base} xhs-creative image2 --prompt-file ${q(imagePromptFile)} --assets-dir ${q(imageSource)} --output-dir ${q(noteTask.account.assetsPath)} ${accountFlag}`,
+              command: `${base} xhs-creative image2 --prompt-file ${q(imagePromptFile)} --assets-dir ${q(imageSource)} --output-dir ${q(account.assetsPath)} ${accountFlag}`,
               description: "按用户指定的图片文件生成封面、图集顺序、图上文字和必要的 image2 轻处理提示。",
               safetyNote: copy.safety
             }

@@ -24,6 +24,41 @@ export interface ApiResponse<T = unknown> {
   code: string;
 }
 
+export interface BackendAccountListItem {
+  id: number;
+  name: string;
+  accountParam: string;
+  accountType: string;
+  stage: string;
+  personaBase: string;
+  city: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface BackendAccountDetail {
+  id: number;
+  name: string;
+  accountParam: string;
+  accountType: string;
+  stage: string;
+  personaBase: string;
+  city: string;
+  targetUsers: string;
+  painPoints: string;
+  contentDirections: string;
+  businessGoals: string;
+  monetization: string;
+  referenceAccounts: string;
+  materialCondition: string;
+  taboos: string;
+  profilePath: string;
+  assetsPath: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /* ---------- localStorage 存储工具 ---------- */
 
 const TOKEN_KEY = "xhs_token";
@@ -164,6 +199,52 @@ export async function autoLogin(): Promise<LoginResponse> {
  */
 export async function getProfile() {
   return authRequest("/user/v1/profile");
+}
+
+export async function fetchBackendAccounts(): Promise<BackendAccountDetail[]> {
+  const listRes = await authRequest<{ accounts?: BackendAccountListItem[] }>("/account/v1/list");
+  if (!listRes.status) {
+    throw new Error(listRes.message || "获取账号列表失败");
+  }
+
+  const accounts = listRes.data?.accounts || [];
+  const details: BackendAccountDetail[] = [];
+
+  for (const item of accounts) {
+    const detailRes = await authRequest<BackendAccountDetail>("/account/v1/detail", {
+      method: "POST",
+      body: { id: item.id }
+    });
+
+    if (!detailRes.status || !detailRes.data) {
+      continue;
+    }
+    details.push(detailRes.data);
+  }
+
+  return details;
+}
+
+export async function createBackendAccount(body: Record<string, unknown>) {
+  const res = await authRequest<{ id: number }>("/account/v1/create", {
+    method: "POST",
+    body
+  });
+  if (!res.status) {
+    throw new Error(res.message || "创建账号失败");
+  }
+  return res.data;
+}
+
+export async function deleteBackendAccount(id: number) {
+  const res = await authRequest("/account/v1/delete", {
+    method: "POST",
+    body: { id }
+  });
+  if (!res.status) {
+    throw new Error(res.message || "删除账号失败");
+  }
+  return res.data;
 }
 
 export async function syncBackendAccounts() {

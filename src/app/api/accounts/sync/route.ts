@@ -153,10 +153,11 @@ export async function POST(request: Request) {
     let skipped = 0;
 
     for (const item of accounts) {
-      const detailRes = await fetch(`${API_BASE_URL}/account/v1/detail/${item.id}`, {
-        method: "GET",
+      const detailRes = await fetch(`${API_BASE_URL}/account/v1/detail`, {
+        method: "POST",
         headers,
-        cache: "no-store"
+        cache: "no-store",
+        body: JSON.stringify({ id: item.id })
       });
       const detailData = (await detailRes.json().catch(() => ({}))) as BackendResponse<BackendAccountDetail>;
       if (!detailRes.ok || detailData.status === false || !detailData.data) {
