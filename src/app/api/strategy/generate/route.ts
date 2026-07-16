@@ -4,6 +4,10 @@ import { accountTypeTemplates, getTemplateByKey } from "@/data/accountTypeTempla
 import { generateStrategyWithLlm } from "@/lib/llm";
 import { buildAccountStrategy } from "@/lib/strategy";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 600;
+
 const requestSchema = z.object({
   account: z.object({
     id: z.number().optional().default(0),
