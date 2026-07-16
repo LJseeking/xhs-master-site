@@ -1341,16 +1341,21 @@ export function XhsMasterApp() {
   async function prepareReferenceResearch() {
     if (!selected) return;
     setLoading(true);
-    const res = await fetch(`/api/accounts/${selected.id}/reference-research`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "prepare" })
-    });
-    const data = await res.json();
-    setReferenceDraft({ research: data.research, commands: data.commands, researchPrompt: data.researchPrompt });
-    await refresh();
-    setLoading(false);
-    showToast("爆款研究已生成。");
+    try {
+      const res = await fetch(`/api/accounts/${selected.id}/reference-research`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "prepare", account: selected })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "生成爆款研究失败。");
+      setReferenceDraft({ research: data.research, commands: data.commands, researchPrompt: data.researchPrompt });
+      setLoading(false);
+      showToast("爆款研究已生成。");
+    } catch (error) {
+      setLoading(false);
+      showToast(error instanceof Error ? error.message : "生成爆款研究失败。");
+    }
   }
 
   async function saveReferenceResearch(event: React.FormEvent<HTMLFormElement>) {
@@ -1364,6 +1369,7 @@ export function XhsMasterApp() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         action: "save-results",
+        account: selected,
         researchId: referenceDraft.research?.id || selected.referenceResearches?.[0]?.id,
         ...payload
       })
@@ -1375,6 +1381,15 @@ export function XhsMasterApp() {
       return;
     }
     setReferenceDraft((current) => ({ ...current, research: data.research, summary: data.summary }));
+    if (data.account) {
+      replaceAccount(data.account);
+      await updateBackendAccount({
+        id: selected.id,
+        referenceAccounts: data.account.referenceAccounts,
+        strategyMarkdown: data.account.strategy?.markdown || "",
+        profileContent: data.account.profile?.content || ""
+      });
+    }
     await refresh();
     setProfileContent(data.account?.profile?.content || profileContent);
     setLoading(false);
