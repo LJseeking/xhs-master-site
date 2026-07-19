@@ -1,26 +1,15 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { slugifyAccountName } from "@/lib/fsPaths";
 import { assertWeddingAccount, buildWeddingImagePlanCommands, buildWeddingImagePlanPrompt } from "@/lib/weddingImagePlanning";
 
 export async function POST(request: Request, context: { params: { id: string } }) {
-  const accountId = Number(context.params.id);
   const body = await request.json().catch(() => ({}));
   const weeks = Number(body.weeks) === 2 ? 2 : 1;
-  const openclawAssetsDir = String(body.openclawAssetsDir || "");
   const openclawImagePaths = String(body.openclawImagePaths || "");
   const planningGoal = String(body.planningGoal || "");
-
-  const account = await prisma.account.findUnique({
-    where: { id: accountId },
-    include: {
-      assets: { orderBy: { createdAt: "desc" }, take: 80 },
-      imageStyleStudies: { orderBy: { createdAt: "desc" }, take: 1 },
-      referenceResearches: { orderBy: { createdAt: "desc" }, take: 1 }
-    }
-  });
+  const account = body.account && typeof body.account === "object" ? body.account : null;
   if (!account) return NextResponse.json({ error: "账号不存在" }, { status: 404 });
 
   try {
@@ -35,7 +24,6 @@ export async function POST(request: Request, context: { params: { id: string } }
   const promptFile = path.join("prompts", slugifyAccountName(account.name), `wedding-image-plan-${weeks}w-${stamp}.md`);
   const content = buildWeddingImagePlanPrompt(account, {
     weeks,
-    openclawAssetsDir,
     openclawImagePaths,
     planningGoal
   });
@@ -43,25 +31,9 @@ export async function POST(request: Request, context: { params: { id: string } }
 
   const commands = buildWeddingImagePlanCommands(account, {
     weeks,
-    openclawAssetsDir,
     openclawImagePaths,
     planningGoal,
     promptFile
-  });
-
-  await prisma.systemLog.create({
-    data: {
-      accountId,
-      level: "info",
-      message: "婚礼批量帖子生成 Prompt 已生成",
-      meta: JSON.stringify({
-        weeks,
-        promptFile,
-        assetsDir: openclawAssetsDir || account.assetsPath,
-        hasImagePaths: Boolean(openclawImagePaths.trim()),
-        hasPlanningGoal: Boolean(planningGoal.trim())
-      })
-    }
   });
 
   return NextResponse.json({

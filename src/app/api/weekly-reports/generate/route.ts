@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { buildWeeklyReportPrompt } from "@/lib/report";
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const accountId = Number(body.accountId);
-  const account = await prisma.account.findUnique({ where: { id: accountId } });
+  const account = body.account && typeof body.account === "object" ? body.account : null;
   if (!account) return NextResponse.json({ error: "账号不存在" }, { status: 404 });
   const prompt = buildWeeklyReportPrompt({
     accountName: account.name,
@@ -20,13 +18,13 @@ export async function POST(request: Request) {
     failedPatterns: body.failedPatterns || "",
     distillGoal: body.distillGoal || ""
   });
-  const report = await prisma.weeklyReport.create({
-    data: {
-      accountId,
-      weeklyPlanId: body.weeklyPlanId ? Number(body.weeklyPlanId) : null,
-      inputJson: JSON.stringify(body, null, 2),
-      prompt
-    }
-  });
+  const report = {
+    id: Date.now(),
+    accountId: account.id,
+    weeklyPlanId: body.weeklyPlanId ? Number(body.weeklyPlanId) : null,
+    inputJson: JSON.stringify(body, null, 2),
+    prompt,
+    createdAt: new Date().toISOString()
+  };
   return NextResponse.json(report);
 }

@@ -1,4 +1,5 @@
 import { accountTypeTemplates, getTemplateByKey } from "@/data/accountTypeTemplates";
+import { completeWithBackendAi } from "@/lib/backendAiClient";
 import { buildAccountStrategy } from "@/lib/strategy";
 
 type ClientAccountInput = {
@@ -62,9 +63,9 @@ type WeeklyPlanInput = {
 
 function getBrowserLlmStatus() {
   return {
-    enabled: Boolean(process.env.NEXT_PUBLIC_OPENAI_API_KEY),
-    model: process.env.NEXT_PUBLIC_OPENAI_MODEL || process.env.NEXT_PUBLIC_OPENAI_MODEL || "gpt-5.5",
-    baseUrl: process.env.NEXT_PUBLIC_OPENAI_BASE_URL || "https://api.openai.com/v1"
+    enabled: true,
+    model: "backend-ai",
+    baseUrl: "backend-ai"
   };
 }
 
@@ -154,78 +155,20 @@ function looksLikeUnsupportedResponses(text: string) {
   );
 }
 
-async function createChatCompletionResponse(
-  input: { instructions: string; input: string },
-  baseUrl: string,
-  model: string,
-  signal: AbortSignal
-) {
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}`,
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: input.instructions },
-        { role: "user", content: input.input }
-      ],
-      stream: false
-    }),
-    signal
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Chat Completions API ${response.status}: ${errorText.slice(0, 600)}`);
-  }
-
-  const json = await response.json();
-  const text = extractChatCompletionText(json);
-  if (!text) throw new Error("Chat Completions API 没有返回文本内容。");
-  return text;
-}
-
 async function createTextResponse(input: { instructions: string; input: string }) {
-  const status = getBrowserLlmStatus();
-  const baseUrl = status.baseUrl.replace(/\/$/, "");
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort("AI request timeout"), 8 * 60 * 1000);
 
   try {
-    const response = await fetch(`${baseUrl}/responses`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}`,
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({
-        model: status.model,
-        instructions: input.instructions,
-        input: input.input,
-        store: false
-      }),
+    const response = await completeWithBackendAi({
+      instructions: input.instructions,
+      input: input.input,
       signal: controller.signal
     });
-
     if (!response.ok) {
-      const errorText = await response.text();
-      const shouldFallbackToChat =
-        response.status === 404 ||
-        response.status === 405 ||
-        (response.status === 400 && looksLikeUnsupportedResponses(errorText));
-      if (!shouldFallbackToChat) {
-        throw new Error(`OpenAI API ${response.status}: ${errorText.slice(0, 600)}`);
-      }
-      return await createChatCompletionResponse(input, baseUrl, status.model, controller.signal);
+      throw new Error(response.error);
     }
-
-    const json = await response.json();
-    const text = extractText(json);
-    if (!text) throw new Error("OpenAI API 没有返回文本内容。");
-    return text;
+    return response.text;
   } finally {
     window.clearTimeout(timeoutId);
   }
@@ -264,7 +207,7 @@ export async function generateStrategyWithBrowserLlm(account: ClientAccountInput
   const fallback = buildAccountStrategy(accountRecord as never, template as never);
   const status = getBrowserLlmStatus();
   if (!status.enabled) {
-    return { usedLlm: false, data: fallback, error: "NEXT_PUBLIC_OPENAI_API_KEY 未配置，已使用内置模板生成。" };
+    return { usedLlm: false, data: fallback, error: "后端 AI 未启用，已使用内置模板生成。" };
   }
 
   const prompt = `请为一个小红书账号生成完整运营策划案和 AGENTS.md。
@@ -363,7 +306,7 @@ export async function generateWeeklyTasksWithBrowserLlm(input: {
 }> {
   const status = getBrowserLlmStatus();
   if (!status.enabled) {
-    return { usedLlm: false, data: input.fallbackTasks, error: "NEXT_PUBLIC_OPENAI_API_KEY 未配置，已使用内置模板生成。" };
+    return { usedLlm: false, data: input.fallbackTasks, error: "后端 AI 未启用，已使用内置模板生成。" };
   }
 
   const prompt = `请根据账号策略、本周目标和素材情况，生成一周小红书 note_tasks。

@@ -60,8 +60,72 @@ export interface BackendAccountDetail {
   strategyExecGuide?: string;
   profileContent?: string;
   profileVersion?: number;
+  assets?: BackendAsset[];
+  weeklyPlans?: BackendWeeklyPlan[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface BackendAsset {
+  id: number;
+  filePath: string;
+  fileUrl?: string;
+  fileType: string;
+  sourceType: string;
+  location?: string;
+  shotAt?: string;
+  tags: string;
+  suitableTypes: string;
+  coverReady: boolean;
+  used: boolean;
+  authorizationState: string;
+  riskNotes: string;
+  width?: number;
+  height?: number;
+  sizeBytes?: number;
+  hash?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface BackendNoteTask {
+  id: number;
+  publishAt: string;
+  contentType: string;
+  contentGoal: string;
+  topicTitle: string;
+  targetUser: string;
+  painPoint: string;
+  coreView: string;
+  bodyStructure: string;
+  requiredImages: string;
+  recommendedAssets: string;
+  coverCopyDirection: string;
+  commentHook: string;
+  expectedGoal: string;
+  status: string;
+  bodyDraft?: string;
+  imagePlan?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface BackendWeeklyPlan {
+  id: number;
+  weekStart: string;
+  theme: string;
+  goal: string;
+  frequency: number;
+  ratio?: string;
+  testHypothesis: string;
+  commercializationMove: string;
+  interactionGoal: string;
+  availableAssets: string;
+  taboos: string;
+  status?: string;
+  noteTasks: BackendNoteTask[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 /* ---------- localStorage 存储工具 ---------- */
@@ -272,6 +336,39 @@ export async function updateBackendAccount(body: Record<string, unknown>) {
   });
   if (!res.status) {
     throw new Error(res.message || "更新账号失败");
+  }
+  return res.data;
+}
+
+export async function saveBackendAssets(accountId: number, assets: BackendAsset[]) {
+  const res = await authRequest<{ assets: BackendAsset[] }>("/account/v1/saveAssets", {
+    method: "POST",
+    body: { accountId, assets }
+  });
+  if (!res.status) {
+    throw new Error(res.message || "保存素材失败");
+  }
+  return res.data.assets || [];
+}
+
+export async function saveBackendWeeklyPlan(accountId: number, plan: BackendWeeklyPlan) {
+  const res = await authRequest<BackendWeeklyPlan>("/account/v1/saveWeeklyPlan", {
+    method: "POST",
+    body: { accountId, plan }
+  });
+  if (!res.status || !res.data) {
+    throw new Error(res.message || "保存周计划失败");
+  }
+  return res.data;
+}
+
+export async function saveBackendNoteTask(accountId: number, weeklyPlanId: number, noteTask: BackendNoteTask) {
+  const res = await authRequest<BackendNoteTask>("/account/v1/saveNoteTask", {
+    method: "POST",
+    body: { accountId, weeklyPlanId, noteTask }
+  });
+  if (!res.status || !res.data) {
+    throw new Error(res.message || "保存单篇内容失败");
   }
   return res.data;
 }

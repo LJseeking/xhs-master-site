@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildAccountStrategy } from "@/lib/strategy";
-import { getLlmStatus, regenerateStrategyFromReferenceResearchWithLlm, summarizeReferenceResearchWithLlm } from "@/lib/llm";
+import { regenerateStrategyFromReferenceResearchWithLlm, summarizeReferenceResearchWithLlm } from "@/lib/llm";
 import { getTemplateByKey } from "@/data/accountTypeTemplates";
 import {
   buildReferenceResearchCommands,
@@ -105,15 +105,6 @@ export async function POST(request: Request) {
     const selectedAccounts = String(body.selectedAccounts || "");
     if (!rawResults.trim()) {
       return NextResponse.json({ error: "请先粘贴 xiaohongshu_auto_op 返回结果。" }, { status: 400 });
-    }
-
-    if (!getLlmStatus().enabled) {
-      return NextResponse.json(
-        {
-          error: "已收到爆款研究结果，但 OPENAI_API_KEY 未配置。请先配置 OpenAI API 再执行总结与重生成。"
-        },
-        { status: 400 }
-      );
     }
 
     const summaryResult = await summarizeReferenceResearchWithLlm({

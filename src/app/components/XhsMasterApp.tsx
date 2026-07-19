@@ -34,8 +34,14 @@ import {
   logout,
   getToken,
   getUser,
+  saveBackendAssets,
+  saveBackendNoteTask,
+  saveBackendWeeklyPlan,
   updateBackendAccount,
   type BackendAccountDetail,
+  type BackendAsset,
+  type BackendNoteTask,
+  type BackendWeeklyPlan,
   type LoginResponse
 } from "@/lib/api";
 import { generateStrategyWithBrowserLlm, generateWeeklyTasksWithBrowserLlm } from "@/lib/browserStrategyLlm";
@@ -159,12 +165,18 @@ type Asset = {
   fileUrl?: string | null;
   fileType: string;
   sourceType: string;
+  location?: string;
+  shotAt?: string;
   tags: string;
   suitableTypes: string;
   coverReady: boolean;
   used: boolean;
   authorizationState: string;
   riskNotes: string;
+  width?: number;
+  height?: number;
+  sizeBytes?: number;
+  hash?: string;
 };
 
 type WeeklyPlan = {
@@ -178,6 +190,7 @@ type WeeklyPlan = {
   interactionGoal: string;
   availableAssets: string;
   taboos: string;
+  status?: string;
   noteTasks: NoteTask[];
 };
 
@@ -197,6 +210,8 @@ type NoteTask = {
   commentHook: string;
   expectedGoal: string;
   status: string;
+  bodyDraft?: string;
+  imagePlan?: string;
 };
 
 type PromptResult = {
@@ -216,10 +231,9 @@ type BatchImagePostsResult = {
   commands: Array<{ category: string; command: string; description: string; safetyNote: string }>;
 };
 
-type SingleImageSourceMode = "ai_generate" | "manual_images" | "folder_select";
+type SingleImageSourceMode = "ai_generate" | "remote_images";
 
 type SingleImagePromptOptions = {
-  openclawAssetsDir?: string;
   openclawImagePaths?: string;
   imageSourceMode?: SingleImageSourceMode;
   noteContent?: string;
@@ -308,6 +322,29 @@ function formatFileSize(bytes: number) {
   return `${value >= 100 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
 }
 
+function fileNameFromRemoteUrl(url: string) {
+  try {
+    const pathname = new URL(url).pathname;
+    const raw = pathname.split("/").filter(Boolean).pop() || url;
+    return decodeURIComponent(raw);
+  } catch {
+    return url;
+  }
+}
+
+function guessRemoteFileType(url: string) {
+  const lower = url.toLowerCase();
+  if (/\.(png)(?:$|\?)/.test(lower)) return "image/png";
+  if (/\.(gif)(?:$|\?)/.test(lower)) return "image/gif";
+  if (/\.(webp)(?:$|\?)/.test(lower)) return "image/webp";
+  if (/\.(avif)(?:$|\?)/.test(lower)) return "image/avif";
+  return "image/jpeg";
+}
+
+function collectRemoteImageUrls(form: FormData) {
+  return Array.from(new Set(form.getAll("selectedAssetUrls").map((item) => String(item || "").trim()).filter(Boolean)));
+}
+
 function summarizeFiles(files: File[]) {
   return {
     count: files.length,
@@ -326,6 +363,39 @@ function mergeFiles(current: File[], incoming: File[]) {
     }
   }
   return merged;
+}
+
+function RemoteAssetPicker(props: {
+  assets: Asset[];
+  pickerLabel: string;
+  pickerHelp: string;
+}) {
+  const remoteAssets = props.assets.filter((asset) => Boolean(asset.fileUrl));
+  return (
+    <div className="space-y-3 rounded border border-ink/10 bg-white p-3">
+      <div>
+        <div className="text-sm font-medium">{props.pickerLabel}</div>
+        <div className="mt-1 text-xs leading-5 text-ink/55">{props.pickerHelp}</div>
+      </div>
+      {remoteAssets.length ? (
+        <div className="grid max-h-56 gap-2 overflow-auto rounded border border-ink/10 bg-ink/5 p-2">
+          {remoteAssets.map((asset) => (
+            <label key={`${asset.id}-${asset.fileUrl}`} className="flex items-start gap-2 rounded bg-white px-3 py-2 text-sm">
+              <input name="selectedAssetUrls" type="checkbox" value={asset.fileUrl || ""} className="mt-1" />
+              <span className="min-w-0">
+                <span className="block truncate font-medium">{asset.filePath}</span>
+                <span className="block truncate text-xs text-teal">{asset.fileUrl}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded border border-dashed border-ink/15 bg-ink/5 px-3 py-4 text-sm text-ink/55">
+          当前账号还没有可选素材，请先上传图片。
+        </div>
+      )}
+    </div>
+  );
 }
 
 function assetUiCopy(accountType?: string) {
@@ -468,7 +538,7 @@ function weeklyUiCopy(accountType?: string) {
       test: "例：用真实菜品文件名自动匹配图文，是否比人工挑图更稳定。",
       conversion: "例：轻量提到团购、预约、套餐、活动期限或到店路线。",
       interaction: "例：引导用户留言想吃哪道菜、人数、预算、忌口、停车交通问题。",
-      assets: "可粘贴龙虾所在电脑上的图片文件夹路径；图片名建议为菜品名/环境名，如 清蒸鲈鱼.jpg、包间.jpg、停车场入口.jpg。"
+      assets: "先把图片上传到后端素材库；上传后的文件名建议体现菜品名或环境名，方便后续自动识别。"
     },
     outdoor: {
       ratio: "路线日记2 / 攻略收藏1 / 装备复盘1",
@@ -898,6 +968,57 @@ function buildLocalAccount(
 }
 
 function mapBackendAccountToUiAccount(account: BackendAccountDetail): Account {
+  const assets = (account.assets || []).map((asset) => ({
+    id: asset.id,
+    filePath: asset.filePath,
+    fileUrl: asset.fileUrl || "",
+    fileType: asset.fileType,
+    sourceType: asset.sourceType,
+    location: asset.location || "",
+    shotAt: asset.shotAt || "",
+    tags: asset.tags || "",
+    suitableTypes: asset.suitableTypes || "",
+    coverReady: Boolean(asset.coverReady),
+    used: Boolean(asset.used),
+    authorizationState: asset.authorizationState || "",
+    riskNotes: asset.riskNotes || "",
+    width: asset.width || 0,
+    height: asset.height || 0,
+    sizeBytes: asset.sizeBytes || 0,
+    hash: asset.hash || ""
+  }));
+  const weeklyPlans = (account.weeklyPlans || []).map((plan) => ({
+    id: plan.id,
+    weekStart: plan.weekStart,
+    theme: plan.theme,
+    goal: plan.goal,
+    frequency: plan.frequency,
+    testHypothesis: plan.testHypothesis,
+    commercializationMove: plan.commercializationMove,
+    interactionGoal: plan.interactionGoal,
+    availableAssets: plan.availableAssets,
+    taboos: plan.taboos,
+    status: plan.status || "draft",
+    noteTasks: (plan.noteTasks || []).map((task) => ({
+      id: task.id,
+      publishAt: task.publishAt || "",
+      contentType: task.contentType || "",
+      contentGoal: task.contentGoal || "",
+      topicTitle: task.topicTitle || "",
+      targetUser: task.targetUser || "",
+      painPoint: task.painPoint || "",
+      coreView: task.coreView || "",
+      bodyStructure: task.bodyStructure || "",
+      requiredImages: task.requiredImages || "",
+      recommendedAssets: task.recommendedAssets || "",
+      coverCopyDirection: task.coverCopyDirection || "",
+      commentHook: task.commentHook || "",
+      expectedGoal: task.expectedGoal || "",
+      status: task.status || "待生成",
+      bodyDraft: task.bodyDraft || "",
+      imagePlan: task.imagePlan || ""
+    }))
+  }));
   return {
     id: account.id,
     name: account.name,
@@ -932,8 +1053,8 @@ function mapBackendAccountToUiAccount(account: BackendAccountDetail): Account {
     postReviews: [],
     expertRules: [],
     industryKnowledgeResearches: [],
-    assets: [],
-    weeklyPlans: []
+    assets,
+    weeklyPlans
   };
 }
 
@@ -951,6 +1072,76 @@ ${account.contentDirections || "真实素材、用户痛点、服务信息、风
 
 ## 风险边界
 只生成方案，不自动发布；价格、活动、档期、资质、案例授权等信息发布前必须人工核验。`;
+}
+
+function toBackendAsset(asset: Asset): BackendAsset {
+  return {
+    id: asset.id,
+    filePath: asset.filePath,
+    fileUrl: asset.fileUrl || "",
+    fileType: asset.fileType,
+    sourceType: asset.sourceType,
+    location: asset.location || "",
+    shotAt: asset.shotAt || "",
+    tags: asset.tags || "",
+    suitableTypes: asset.suitableTypes || "",
+    coverReady: Boolean(asset.coverReady),
+    used: Boolean(asset.used),
+    authorizationState: asset.authorizationState || "",
+    riskNotes: asset.riskNotes || "",
+    width: asset.width || 0,
+    height: asset.height || 0,
+    sizeBytes: asset.sizeBytes || 0,
+    hash: asset.hash || ""
+  };
+}
+
+function toBackendNoteTask(task: NoteTask): BackendNoteTask {
+  return {
+    id: task.id,
+    publishAt: task.publishAt,
+    contentType: task.contentType,
+    contentGoal: task.contentGoal,
+    topicTitle: task.topicTitle,
+    targetUser: task.targetUser,
+    painPoint: task.painPoint,
+    coreView: task.coreView,
+    bodyStructure: task.bodyStructure,
+    requiredImages: task.requiredImages,
+    recommendedAssets: task.recommendedAssets,
+    coverCopyDirection: task.coverCopyDirection,
+    commentHook: task.commentHook,
+    expectedGoal: task.expectedGoal,
+    status: task.status,
+    bodyDraft: task.bodyDraft || "",
+    imagePlan: task.imagePlan || ""
+  };
+}
+
+function toBackendWeeklyPlan(plan: WeeklyPlan): BackendWeeklyPlan {
+  return {
+    id: plan.id,
+    weekStart: plan.weekStart,
+    theme: plan.theme,
+    goal: plan.goal,
+    frequency: plan.frequency,
+    testHypothesis: plan.testHypothesis,
+    commercializationMove: plan.commercializationMove,
+    interactionGoal: plan.interactionGoal,
+    availableAssets: plan.availableAssets,
+    taboos: plan.taboos,
+    status: plan.status || "draft",
+    noteTasks: plan.noteTasks.map(toBackendNoteTask)
+  };
+}
+
+function parseDraftContent(bodyDraft?: string) {
+  if (!bodyDraft) return {};
+  try {
+    return JSON.parse(bodyDraft) as Record<string, string>;
+  } catch {
+    return {};
+  }
 }
 
 function needsAiStrategy(account: Account) {
@@ -972,8 +1163,8 @@ function mergeBackendAccountWithLocalState(account: Account, local?: Account): A
     industryKnowledgeResearches: local.industryKnowledgeResearches?.length
       ? local.industryKnowledgeResearches
       : account.industryKnowledgeResearches,
-    assets: local.assets?.length ? local.assets : account.assets,
-    weeklyPlans: local.weeklyPlans?.length ? local.weeklyPlans : account.weeklyPlans
+    assets: account.assets,
+    weeklyPlans: account.weeklyPlans
   };
 }
 
@@ -1221,69 +1412,101 @@ export function XhsMasterApp() {
     showToast("配置文件已保存到浏览器。");
   }
 
-  async function uploadAsset(form: HTMLFormElement) {
-    if (!selected) return;
-    const data = new FormData(form);
-    data.set("accountId", String(selected.id));
-    const token = getToken();
-    const user = getUser();
-    if (!token || !user) {
-      showToast("登录状态失效，请重新登录后再上传。");
-      return;
-    }
-    setLoading(true);
-    const res = await fetch("/api/assets/upload", {
-      method: "POST",
-      headers: {
-        "Xhs-Sign": token,
-        "Xhs-Person": String(user.uid),
-        "Xhs-Time": Math.floor(Date.now() / 1000).toString(),
-        "Xhs-Request-Id": `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-        "Xhs-Test": "1"
-      },
-      body: data
-    });
-    if (res.ok) {
-      const result = await res.json().catch(() => ({ count: 1, assets: [] }));
-      form.reset();
-      if (Array.isArray(result.assets?.length ? result.assets : result.assets)) {
-        updateSelectedAccount((account) => ({
-          ...account,
-          assets: [...(result.assets || []), ...account.assets]
-        }));
-      }
-      showToast(`已上传 ${result.count || 1} 个素材，并同步了可访问 URL。`);
-    } else {
-      const result = await res.json().catch(() => ({ error: "上传失败。" }));
-      showToast(result.error || "上传失败。");
-    }
-    setLoading(false);
-  }
-
-  async function importAssetFolder(form: HTMLFormElement) {
+  async function uploadAsset(form: HTMLFormElement, files: File[], clearFiles?: () => void) {
     if (!selected) return;
     const formData = new FormData(form);
-    const payload = Object.fromEntries(formData.entries());
-    setLoading(true);
+    if (!files.length) {
+      showToast("请先选择要上传到后端素材库的图片。");
+      return;
+    }
     try {
-      const res = await fetch("/api/assets/import-folder", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          ...payload,
-          existingFilePaths: selected.assets.map((asset) => asset.filePath)
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "批量导入素材失败。");
+      setLoading(true);
+      const sourceType = String(formData.get("sourceType") || "真实素材");
+      const tags = String(formData.get("tags") || "");
+      const suitableTypes = String(formData.get("suitableTypes") || "");
+      const coverReady = formData.get("coverReady") === "true";
+      const authorizationState = String(formData.get("authorizationState") || "待确认");
+      const riskNotes = String(formData.get("riskNotes") || "");
+
+      let uploadedAssets: Asset[] = [];
+      if (files.length) {
+        const token = getToken();
+        const user = getUser();
+        if (!token || !user) {
+          throw new Error("登录状态失效，请重新登录后再上传。");
+        }
+
+        const uploadForm = new FormData();
+        uploadForm.set("accountId", String(selected.id));
+        uploadForm.set("sourceType", sourceType);
+        uploadForm.set("authorizationState", authorizationState);
+        uploadForm.set("tags", tags);
+        uploadForm.set("suitableTypes", suitableTypes);
+        uploadForm.set("riskNotes", riskNotes);
+        if (coverReady) uploadForm.set("coverReady", "true");
+        for (const file of files) uploadForm.append("files", file);
+
+        const uploadRes = await fetch("/api/assets/upload", {
+          method: "POST",
+          headers: {
+            "Xhs-Sign": token,
+            "Xhs-Person": String(user.uid),
+            "Xhs-Time": Math.floor(Date.now() / 1000).toString(),
+            "Xhs-Request-Id": `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+            "Xhs-Test": "1"
+          },
+          body: uploadForm
+        });
+        const uploadData = await uploadRes.json().catch(() => ({}));
+        if (!uploadRes.ok) {
+          throw new Error(uploadData.error || "上传图片失败。");
+        }
+        uploadedAssets = uploadData.assets || [];
+      }
+      const nextAssets = [
+        ...uploadedAssets.map((asset) => ({
+          ...asset,
+          sourceType: asset.sourceType || sourceType,
+          tags: asset.tags || tags,
+          suitableTypes: asset.suitableTypes || suitableTypes,
+          coverReady: typeof asset.coverReady === "boolean" ? asset.coverReady : coverReady,
+          authorizationState: asset.authorizationState || authorizationState,
+          riskNotes: asset.riskNotes || riskNotes
+        }))
+      ];
+      const savedAssets = await saveBackendAssets(selected.id, nextAssets.map((asset) => toBackendAsset(asset as Asset)));
+      const mappedSavedAssets = savedAssets.map((asset) => ({
+        id: asset.id,
+        filePath: asset.filePath,
+        fileUrl: asset.fileUrl || "",
+        fileType: asset.fileType,
+        sourceType: asset.sourceType,
+        location: asset.location || "",
+        shotAt: asset.shotAt || "",
+        tags: asset.tags || "",
+        suitableTypes: asset.suitableTypes || "",
+        coverReady: Boolean(asset.coverReady),
+        used: Boolean(asset.used),
+        authorizationState: asset.authorizationState || "",
+        riskNotes: asset.riskNotes || "",
+        width: asset.width || 0,
+        height: asset.height || 0,
+        sizeBytes: asset.sizeBytes || 0,
+        hash: asset.hash || ""
+      }));
+
       updateSelectedAccount((account) => ({
         ...account,
-        assetsPath: data.folderPath || account.assetsPath,
-        assets: [...(data.assets || []), ...account.assets]
+        assets: [
+          ...mappedSavedAssets.filter((asset) => !account.assets.some((current) => current.fileUrl && current.fileUrl === asset.fileUrl)),
+          ...account.assets
+        ]
       }));
-      showToast(`已批量导入 ${data.imported} 个素材，跳过 ${data.skipped} 个已存在文件。`);
+      form.reset();
+      clearFiles?.();
+      showToast(`已上传 ${mappedSavedAssets.length} 个素材。`);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "批量导入素材失败。");
+      showToast(error instanceof Error ? error.message : "上传素材失败。");
     } finally {
       setLoading(false);
     }
@@ -1354,13 +1577,25 @@ export function XhsMasterApp() {
       });
       const nextPlan = {
         ...plan,
-        noteTasks: llmResult.data.map((task, index) => ({ ...task, id: Date.now() + index }))
+        status: "draft",
+        noteTasks: llmResult.data.map((task, index) => ({ ...task, id: Date.now() + index, bodyDraft: "", imagePlan: "" }))
       };
+      const savedPlan = await saveBackendWeeklyPlan(selected.id, toBackendWeeklyPlan(nextPlan));
+      const mappedSavedPlan = mapBackendAccountToUiAccount({
+        ...selected,
+        strategyMarkdown: selected.strategy?.markdown || "",
+        strategyPositioning: selected.strategy?.positioning || "",
+        strategyExecGuide: selected.strategy?.execGuide || "",
+        profileContent: selected.profile?.content || "",
+        profileVersion: selected.profile?.version || 1,
+        assets: selected.assets.map(toBackendAsset),
+        weeklyPlans: [savedPlan]
+      } as unknown as BackendAccountDetail).weeklyPlans[0];
       updateSelectedAccount((account) => ({
         ...account,
-        weeklyPlans: [nextPlan, ...(account.weeklyPlans || [])]
+        weeklyPlans: [mappedSavedPlan, ...(account.weeklyPlans || []).filter((item) => item.id !== mappedSavedPlan.id)]
       }));
-      setSelectedNoteId(nextPlan.noteTasks?.[0]?.id ?? null);
+      setSelectedNoteId(mappedSavedPlan.noteTasks?.[0]?.id ?? null);
       setActiveTab("prompts");
       showToast(llmResult.usedLlm ? "本周内容计划已生成。" : llmResult.error || "已使用默认模板生成本周内容计划。");
     } catch (error) {
@@ -1414,7 +1649,16 @@ export function XhsMasterApp() {
     }
     setReferenceDraft((current) => ({ ...current, research: data.research, summary: data.summary }));
     if (data.account) {
-      replaceAccount(data.account);
+      updateSelectedAccount((account) => ({
+        ...account,
+        referenceAccounts: data.account.referenceAccounts,
+        strategy: data.account.strategy || account.strategy,
+        profile: data.account.profile || account.profile,
+        referenceResearches: [
+          data.research,
+          ...(account.referenceResearches || []).filter((item) => item.id !== data.research.id)
+        ]
+      }));
       await updateBackendAccount({
         id: selected.id,
         referenceAccounts: data.account.referenceAccounts,
@@ -1422,7 +1666,6 @@ export function XhsMasterApp() {
         profileContent: data.account.profile?.content || ""
       });
     }
-    await refresh();
     setProfileContent(data.account?.profile?.content || profileContent);
     setLoading(false);
     showToast("已基于爆款研究增强策划案和配置文件。");
@@ -1435,12 +1678,11 @@ export function XhsMasterApp() {
       const res = await fetch(`/api/accounts/${selected.id}/image-style-study`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "prepare" })
+        body: JSON.stringify({ action: "prepare", account: selected })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "生成图片风格研究包失败。");
       setImageStyleDraft({ study: data.study, commands: data.commands, researchPrompt: data.researchPrompt });
-      await refresh();
       showToast("图片风格研究已生成。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "生成图片风格研究包失败。");
@@ -1462,13 +1704,17 @@ export function XhsMasterApp() {
         body: JSON.stringify({
           action: "save-results",
           studyId: imageStyleDraft.study?.id || selected.imageStyleStudies?.[0]?.id,
+          account: selected,
           ...payload
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "保存图片风格研究失败。");
       setImageStyleDraft((current) => ({ ...current, study: data.study, summary: data.summary }));
-      await refresh();
+      updateSelectedAccount((account) => ({
+        ...account,
+        imageStyleStudies: [data.study, ...(account.imageStyleStudies || []).filter((item) => item.id !== data.study.id)]
+      }));
       showToast(data.warning || "图片风格研究已总结，后续图片方案会自动引用。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "保存图片风格研究失败。");
@@ -1486,6 +1732,8 @@ export function XhsMasterApp() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           action: "prepare",
+          account: selected,
+          noteTask: selectedNote || null,
           noteTaskId: noteTaskId || selectedNote?.id || null,
           publishedNoteUrl: options?.publishedNoteUrl || "",
           interactionGoal: options?.interactionGoal || ""
@@ -1499,7 +1747,10 @@ export function XhsMasterApp() {
         discoveryPrompt: data.discoveryPrompt,
         commentPrompt: data.commentPrompt
       });
-      await refresh();
+      updateSelectedAccount((account) => ({
+        ...account,
+        interactionPlans: [data.plan, ...(account.interactionPlans || []).filter((item) => item.id !== data.plan.id)]
+      }));
       showToast("已发布笔记互动建议已生成。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "生成目标用户互动研究包失败。");
@@ -1520,6 +1771,8 @@ export function XhsMasterApp() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           action: "save-results",
+          account: selected,
+          noteTask: selectedNote || null,
           planId: interactionDraft.plan?.id || selected.interactionPlans?.[0]?.id,
           noteTaskId: selectedNote?.id || null,
           ...payload
@@ -1528,7 +1781,10 @@ export function XhsMasterApp() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "保存目标用户互动结果失败。");
       setInteractionDraft((current) => ({ ...current, plan: data.plan, summary: data.summary }));
-      await refresh();
+      updateSelectedAccount((account) => ({
+        ...account,
+        interactionPlans: [data.plan, ...(account.interactionPlans || []).filter((item) => item.id !== data.plan.id)]
+      }));
       showToast(data.warning || "目标用户互动策略已生成。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "保存目标用户互动结果失败。");
@@ -1563,7 +1819,7 @@ export function XhsMasterApp() {
   }
 
   async function generateImagePrompt(task: NoteTask, options?: SingleImagePromptOptions) {
-    if (!selected) return;
+    if (!selected || !latestPlan) return;
     setLoading(true);
     try {
       const res = await fetch(`/api/note-tasks/${task.id}/image-prompt`, {
@@ -1574,6 +1830,33 @@ export function XhsMasterApp() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "生成图片方案失败。");
       setImagePromptResults((current) => ({ ...current, [task.id]: data }));
+      const savedTask = await saveBackendNoteTask(
+        selected.id,
+        latestPlan.id,
+        toBackendNoteTask({
+          ...task,
+          imagePlan: data.imagePrompt?.content || task.imagePlan || "",
+          status: task.status || "已生成图片方案"
+        })
+      );
+      updateSelectedAccount((account) => ({
+        ...account,
+        weeklyPlans: account.weeklyPlans.map((plan) =>
+          plan.id !== latestPlan.id
+            ? plan
+            : {
+                ...plan,
+                noteTasks: plan.noteTasks.map((item) =>
+                  item.id === task.id
+                    ? {
+                        ...item,
+                        ...savedTask
+                      }
+                    : item
+                )
+              }
+        )
+      }));
       showToast("图片方案和执行命令已生成。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "生成图片方案失败。");
@@ -1582,14 +1865,17 @@ export function XhsMasterApp() {
     }
   }
 
-  async function generateBatchImagePosts(options?: { weeks?: string; openclawAssetsDir?: string; openclawImagePaths?: string; planningGoal?: string }) {
+  async function generateBatchImagePosts(options?: { weeks?: string; openclawImagePaths?: string; planningGoal?: string }) {
     if (!selected) return;
     setLoading(true);
     try {
       const res = await fetch(`/api/accounts/${selected.id}/batch-image-posts`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(options || {})
+        body: JSON.stringify({
+          ...(options || {}),
+          account: selected
+        })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "生成批量图片帖子失败。");
@@ -1604,17 +1890,42 @@ export function XhsMasterApp() {
 
   async function saveDraft(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedNote) return;
+    if (!selected || !latestPlan || !selectedNote) return;
+    const form = new FormData(event.currentTarget);
+    const payload = Object.fromEntries(form.entries()) as Record<string, string>;
     setLoading(true);
-    updateSelectedAccount((account) => ({
-      ...account,
-      weeklyPlans: account.weeklyPlans.map((plan) => ({
-        ...plan,
-        noteTasks: plan.noteTasks.map((task) => (task.id === selectedNote.id ? { ...task, status: "已保存草稿" } : task))
-      }))
-    }));
-    setLoading(false);
-    showToast("草稿状态已保存到浏览器。");
+    try {
+      const nextTask: NoteTask = {
+        ...selectedNote,
+        status: "已保存草稿",
+        bodyDraft: JSON.stringify(payload),
+        imagePlan: imagePromptResults[selectedNote.id]?.imagePrompt?.content || selectedNote.imagePlan || ""
+      };
+      const savedTask = await saveBackendNoteTask(selected.id, latestPlan.id, toBackendNoteTask(nextTask));
+      updateSelectedAccount((account) => ({
+        ...account,
+        weeklyPlans: account.weeklyPlans.map((plan) =>
+          plan.id !== latestPlan.id
+            ? plan
+            : {
+                ...plan,
+                noteTasks: plan.noteTasks.map((task) =>
+                  task.id === selectedNote.id
+                    ? {
+                        ...task,
+                        ...savedTask
+                      }
+                    : task
+                )
+              }
+        )
+      }));
+      showToast("草稿已保存到后端。");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "保存草稿失败。");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function generatePostReview(event: React.FormEvent<HTMLFormElement>) {
@@ -1627,6 +1938,8 @@ export function XhsMasterApp() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          account: selected,
+          noteTask: selectedNote || null,
           noteTaskId: form.get("noteTaskId") || selectedNote?.id || null,
           postTitle: form.get("postTitle"),
           postUrl: form.get("postUrl"),
@@ -1643,7 +1956,10 @@ export function XhsMasterApp() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "生成单帖复盘失败。");
       setPostReviewPrompt(data.prompt || "");
-      await refresh();
+      updateSelectedAccount((account) => ({
+        ...account,
+        postReviews: [data.review, ...(account.postReviews || []).filter((item) => item.id !== data.review.id)]
+      }));
       downloadText(`post-review-${selected.name}.md`, data.prompt || "");
       showToast("单帖专家复盘 Prompt 已生成并下载。");
     } catch (error) {
@@ -1664,6 +1980,7 @@ export function XhsMasterApp() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           action: "prepare",
+          account: selected,
           topic: form.get("topic"),
           searchScope: form.get("searchScope")
         })
@@ -1671,7 +1988,13 @@ export function XhsMasterApp() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "生成行业学习任务失败。");
       setIndustryLearningDraft({ research: data.research, commands: data.commands, researchPrompt: data.researchPrompt });
-      await refresh();
+      updateSelectedAccount((account) => ({
+        ...account,
+        industryKnowledgeResearches: [
+          data.research,
+          ...(account.industryKnowledgeResearches || []).filter((item) => item.id !== data.research.id)
+        ]
+      }));
       showToast("行业学习任务已生成。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "生成行业学习任务失败。");
@@ -1691,6 +2014,7 @@ export function XhsMasterApp() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           action: "save-results",
+          account: selected,
           researchId: industryLearningDraft.research?.id || selected.industryKnowledgeResearches?.[0]?.id,
           topic: form.get("topic"),
           searchScope: form.get("searchScope"),
@@ -1701,7 +2025,13 @@ export function XhsMasterApp() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "保存行业学习失败。");
       setIndustryLearningDraft((current) => ({ ...current, research: data.research }));
-      await refresh();
+      updateSelectedAccount((account) => ({
+        ...account,
+        industryKnowledgeResearches: [
+          data.research,
+          ...(account.industryKnowledgeResearches || []).filter((item) => item.id !== data.research.id)
+        ]
+      }));
       showToast("行业学习材料已保存。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "保存行业学习失败。");
@@ -1720,13 +2050,17 @@ export function XhsMasterApp() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          account: selected,
           rulesJson: form.get("rulesJson"),
           source: form.get("source") || "manual"
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "保存规则失败。");
-      await refresh();
+      updateSelectedAccount((account) => ({
+        ...account,
+        expertRules: [...(data.rules || []), ...(account.expertRules || []).filter((item) => !(data.rules || []).some((rule: { id: number }) => rule.id === item.id))]
+      }));
       showToast(`已保存 ${data.rules?.length || 0} 条候选规则。`);
     } catch (error) {
       showToast(error instanceof Error ? error.message : "保存规则失败。");
@@ -1889,7 +2223,6 @@ export function XhsMasterApp() {
             <AssetsPanel
               selected={selected}
               uploadAsset={uploadAsset}
-              importAssetFolder={importAssetFolder}
               generateManifest={generateManifest}
               manifest={manifest}
               copy={copy}
@@ -1902,6 +2235,15 @@ export function XhsMasterApp() {
               plan={latestPlan}
               selectedNoteId={selectedNote?.id ?? null}
               setSelectedNoteId={setSelectedNoteId}
+              onAssetsAdded={(assets) =>
+                updateSelectedAccount((account) => ({
+                  ...account,
+                  assets: [
+                    ...assets.filter((asset) => !account.assets.some((current) => current.fileUrl && current.fileUrl === asset.fileUrl)),
+                    ...account.assets
+                  ]
+                }))
+              }
               imageStyleDraft={imageStyleDraft}
               prepareImageStyleStudy={prepareImageStyleStudy}
               saveImageStyleStudy={saveImageStyleStudy}
@@ -2394,13 +2736,13 @@ function AgentsPanel(props: {
 
 function AssetsPanel(props: {
   selected?: Account;
-  uploadAsset: (form: HTMLFormElement) => void;
-  importAssetFolder: (form: HTMLFormElement) => void;
+  uploadAsset: (form: HTMLFormElement, files: File[], clearFiles?: () => void) => void;
   generateManifest: () => void;
   manifest: { content: string; validation: string; path: string } | null;
   copy: (text: string) => void;
 }) {
-  const { selected, uploadAsset, importAssetFolder, generateManifest, manifest, copy } = props;
+  const { selected, uploadAsset, generateManifest, manifest, copy } = props;
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   if (!selected) return <EmptyState />;
   const copyText = assetUiCopy(selected.accountType);
   const authorizedCount = selected.assets.filter((asset) => ["已授权", "可商用"].includes(asset.authorizationState)).length;
@@ -2420,10 +2762,10 @@ function AssetsPanel(props: {
           </button>
         </div>
         <div className="grid gap-3 md:grid-cols-3">
-          <div className="rounded border border-ink/10 bg-white p-3">
-            <div className="text-xs font-medium text-ink/55">已登记素材</div>
-            <div className="mt-2 text-2xl font-semibold">{selected.assets.length}</div>
-            <p className="mt-1 text-sm text-ink/60">账号级长期素材，会被批量自动模式和文件夹自动选图优先参考。</p>
+            <div className="rounded border border-ink/10 bg-white p-3">
+              <div className="text-xs font-medium text-ink/55">已登记素材</div>
+              <div className="mt-2 text-2xl font-semibold">{selected.assets.length}</div>
+            <p className="mt-1 text-sm text-ink/60">账号级长期素材，会被批量生成和单篇精修的远程多图选择优先参考。</p>
           </div>
           <div className="rounded border border-ink/10 bg-white p-3">
             <div className="text-xs font-medium text-ink/55">授权状态</div>
@@ -2431,9 +2773,9 @@ function AssetsPanel(props: {
             <p className="mt-1 text-sm text-ink/60">未确认肖像、价格、地点、路线、档期或资质时，生成内容必须保留核验提示。</p>
           </div>
           <div className="rounded border border-ink/10 bg-white p-3">
-            <div className="text-xs font-medium text-ink/55">龙虾读取目录</div>
-            <div className="mt-2 truncate text-sm font-semibold">{selected.assetsPath}</div>
-            <p className="mt-1 text-sm text-ink/60">网页上传的文件会落到这个本机目录，龙虾读取的是这些本地文件。</p>
+            <div className="text-xs font-medium text-ink/55">远程可预览素材</div>
+            <div className="mt-2 text-sm font-semibold">{selected.assets.filter((asset) => asset.fileUrl).length} 个</div>
+            <p className="mt-1 text-sm text-ink/60">上传后的素材会直接复用到批量选图和单篇精修。</p>
           </div>
         </div>
       </div>
@@ -2442,24 +2784,54 @@ function AssetsPanel(props: {
         className="panel"
         onSubmit={(event) => {
           event.preventDefault();
-          uploadAsset(event.currentTarget);
+          uploadAsset(event.currentTarget, uploadFiles, () => setUploadFiles([]));
         }}
       >
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h2 className="section-title">添加长期素材</h2>
-            <p className="text-sm text-ink/60">适合一组以后会反复使用的真实素材；如果只是某篇笔记临时用图，请在“图片方案”里上传。</p>
+            <h2 className="section-title">上传素材</h2>
+            <p className="text-sm text-ink/60">上传后会进入当前账号素材库。</p>
           </div>
           <button type="submit" className="primary-button">
-            <Upload size={17} /> 上传
+            <Upload size={17} /> 上传并登记素材
           </button>
         </div>
         <div className="grid gap-3 md:grid-cols-4">
-          <label className="field md:col-span-2">
-            <span>图片 / 视频</span>
-            <input name="files" type="file" accept="image/*,video/*" multiple required />
-            <span className="text-xs text-ink/50">上传后会尽量保留原文件名，便于后面自动识别“清蒸鲈鱼”“包间”“停车场入口”等素材。</span>
+          <label className="field md:col-span-4">
+            <span>上传图片到后端素材库</span>
+            <input
+              type="file"
+              accept="image/*,video/*"
+              multiple
+              onChange={(event) => {
+                const nextFiles = Array.from(event.target.files || []);
+                setUploadFiles((current) => mergeFiles(current, nextFiles));
+                event.currentTarget.value = "";
+              }}
+            />
+            <span className="text-xs text-ink/50">支持一次多选，也可以连续追加。</span>
           </label>
+          {uploadFiles.length > 0 && (
+            <div className="rounded border border-teal/20 bg-teal/5 p-3 md:col-span-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-sm font-medium text-teal">
+                  待上传 {summarizeFiles(uploadFiles).count} 个文件，合计 {formatFileSize(summarizeFiles(uploadFiles).totalBytes)}
+                </div>
+                <button
+                  type="button"
+                  className="text-xs text-ink/55 underline-offset-2 hover:underline"
+                  onClick={() => setUploadFiles([])}
+                >
+                  清空本次选择
+                </button>
+              </div>
+              <div className="mt-2 max-h-32 overflow-auto rounded bg-white/80 px-3 py-2 text-xs text-ink/65">
+                {uploadFiles.map((file) => (
+                  <div key={`${file.name}-${file.size}-${file.lastModified}`}>{file.name} · {formatFileSize(file.size)}</div>
+                ))}
+              </div>
+            </div>
+          )}
           <label className="field">
             <span>授权状态</span>
             <select name="authorizationState" defaultValue="待确认">
@@ -2492,53 +2864,6 @@ function AssetsPanel(props: {
         </div>
       </form>
 
-      <form
-        className="panel"
-        onSubmit={(event) => {
-          event.preventDefault();
-          importAssetFolder(event.currentTarget);
-        }}
-      >
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="section-title">批量上传素材包（高级）</h2>
-            <p className="mt-1 text-sm text-ink/60">
-              图片特别多、已经在这台电脑或共享盘里整理好时，用这里批量导入整个文件夹；系统会扫描文件并登记到素材库，不重复复制文件。
-            </p>
-          </div>
-          <button type="submit" className="secondary-button">
-            <Library size={17} /> 批量上传
-          </button>
-        </div>
-        <div className="grid gap-3 md:grid-cols-4">
-          <Input
-            name="folderPath"
-            label="这台电脑可访问的素材文件夹"
-            placeholder={copyText.folderPlaceholder}
-            help="如果图片在客户其他电脑，先用 U 盘、网盘同步或共享盘挂载到这台电脑；系统会扫描这个文件夹并批量导入素材记录。"
-          />
-          <label className="field">
-            <span>来源类型</span>
-            <select name="sourceType" defaultValue={copyText.source}>
-              {sourceTypes.map((type) => (
-                <option key={type}>{type}</option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>授权状态</span>
-            <select name="authorizationState" defaultValue="已授权">
-              {authStates.map((state) => (
-                <option key={state}>{state}</option>
-              ))}
-            </select>
-          </label>
-          <Input name="tags" label="统一标签" placeholder={copyText.tags} />
-          <Input name="suitableTypes" label="适合什么内容" placeholder={copyText.suitable} />
-          <Input name="riskNotes" label="统一核验备注" placeholder={copyText.risk} />
-        </div>
-      </form>
-
       <div className="panel">
         <div className="mb-4">
           <div>
@@ -2547,7 +2872,7 @@ function AssetsPanel(props: {
           </div>
         </div>
         {!selected.assets.length ? (
-          <EmptyState text="还没有素材。建议先上传图片；如果是大批量客户素材，再登记已有文件夹。没有真实素材时，只能生成补拍清单、信息卡或辅助图方案。" />
+          <EmptyState text="还没有素材，请先上传图片。" />
         ) : (
           <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-4">
             {selected.assets.map((asset) => (
@@ -2565,7 +2890,7 @@ function AssetsPanel(props: {
                   ) : (
                     <div className="grid place-items-center gap-2 px-4 text-center text-xs text-ink/55">
                       <ImageIcon size={28} />
-                      <span>{asset.fileUrl ? "远程素材，可直接预览" : "本地路径素材，供龙虾读取"}</span>
+                      <span>{asset.fileUrl ? "后端素材，可直接预览" : "当前素材缺少后端图片链接"}</span>
                     </div>
                   )}
                 </div>
@@ -2820,6 +3145,7 @@ function ImagesPanel(props: {
   plan?: WeeklyPlan;
   selectedNoteId: number | null;
   setSelectedNoteId: (id: number) => void;
+  onAssetsAdded: (assets: Asset[]) => void;
   imageStyleDraft: {
     study?: ImageStyleStudy;
     commands?: Array<{ category: string; command: string; description: string; safetyNote: string }>;
@@ -2831,7 +3157,7 @@ function ImagesPanel(props: {
   imagePromptResults: Record<number, ImagePromptResult>;
   generateImagePrompt: (task: NoteTask, options?: SingleImagePromptOptions) => void;
   batchImagePostResult?: BatchImagePostsResult | null;
-  generateBatchImagePosts: (options?: { weeks?: string; openclawAssetsDir?: string; openclawImagePaths?: string; planningGoal?: string }) => void;
+  generateBatchImagePosts: (options?: { weeks?: string; openclawImagePaths?: string; planningGoal?: string }) => void;
   copy: (text: string) => void;
   loading: boolean;
 }) {
@@ -2840,6 +3166,7 @@ function ImagesPanel(props: {
     plan,
     selectedNoteId,
     setSelectedNoteId,
+    onAssetsAdded,
     imageStyleDraft,
     prepareImageStyleStudy,
     saveImageStyleStudy,
@@ -2861,11 +3188,11 @@ function ImagesPanel(props: {
   const commandList = [...(batchImagePostResult?.commands || []), ...(result?.commands || [])];
   const [weddingPlanningGoal, setWeddingPlanningGoal] = useState(weddingPlanningGoalPresets[0].value);
   const [imageWorkflowMode, setImageWorkflowMode] = useState<"batch" | "single">("batch");
-  const [singleSourceMode, setSingleSourceMode] = useState<SingleImageSourceMode>("folder_select");
+  const [singleSourceMode, setSingleSourceMode] = useState<SingleImageSourceMode>("remote_images");
   const [singleImageGoal, setSingleImageGoal] = useState("围绕这篇笔记内容，生成封面、图集顺序、图上文字、正文结构和风险核验。");
   const [singleImageCount, setSingleImageCount] = useState("5");
   const [batchUploadFiles, setBatchUploadFiles] = useState<File[]>([]);
-  const [singleManualFiles, setSingleManualFiles] = useState<File[]>([]);
+  const [singleUploadFiles, setSingleUploadFiles] = useState<File[]>([]);
 
   async function uploadFilesWithAuth(files: File[], options?: { suitableTypes?: string; tags?: string }) {
     const token = getToken();
@@ -2897,16 +3224,41 @@ function ImagesPanel(props: {
     if (!uploadRes.ok) {
       throw new Error(uploadData.error || "上传图片失败。");
     }
-    return uploadData as { count?: number; assets?: Array<{ filePath: string; localFilePath?: string }> };
+    const savedAssets = await saveBackendAssets(
+      selected?.id || 0,
+      ((uploadData as { assets?: Asset[] }).assets || []).map((asset) => toBackendAsset(asset))
+    );
+    return {
+      count: savedAssets.length,
+      assets: savedAssets.map((asset) => ({
+        id: asset.id,
+        filePath: asset.filePath,
+        fileUrl: asset.fileUrl || "",
+        fileType: asset.fileType,
+        sourceType: asset.sourceType,
+        location: asset.location || "",
+        shotAt: asset.shotAt || "",
+        tags: asset.tags || "",
+        suitableTypes: asset.suitableTypes || "",
+        coverReady: Boolean(asset.coverReady),
+        used: Boolean(asset.used),
+        authorizationState: asset.authorizationState || "",
+        riskNotes: asset.riskNotes || "",
+        width: asset.width || 0,
+        height: asset.height || 0,
+        sizeBytes: asset.sizeBytes || 0,
+        hash: asset.hash || ""
+      }))
+    } as { count?: number; assets?: Asset[] };
   }
 
   {
     const batchCommand = batchImagePostResult?.commands?.[0];
     const activeSingleCommand = result?.commands?.[0];
-    const accountKindLabel = isWedding ? "婚礼现场图" : "素材图片";
-    const batchTitle = isWedding ? "用婚礼现场图自动生成批量帖子" : "用素材文件夹自动生成批量帖子";
+    const accountKindLabel = isWedding ? "婚礼已上传图片" : "已上传素材图片";
+    const batchTitle = isWedding ? "用婚礼远程图片自动生成批量帖子" : "用远程图片自动生成批量帖子";
     const batchDescription = isWedding
-      ? "适合已经有一批婚礼现场图，但还没有想好每篇发什么。龙虾会先读图，再结合全国同类型爆款，直接产出多篇帖子方案。"
+      ? "适合已经有一批婚礼远程图片，但还没有想好每篇发什么。龙虾会先读图，再结合全国同类型爆款，直接产出多篇帖子方案。"
       : "适合已经有一批素材图，但还没有想好每篇发什么。龙虾会先读图，再结合全国同类型爆款，直接产出多篇帖子方案。";
     const defaultBatchGoal = isWedding
       ? "例如：优先从婚礼蛋糕、花艺、仪式区、迎宾区、桌花中找高收藏选题。"
@@ -2916,11 +3268,11 @@ function ImagesPanel(props: {
         <div className="panel">
           <div className="mb-4">
             <h2 className="section-title">图片生成帖子</h2>
-            <p className="mt-1 text-sm text-ink/60">先选择要批量处理一整个文件夹，还是只精修一篇笔记。单篇模式再决定图片由 AI 生成、用户指定，或由龙虾从文件夹自动挑选。</p>
+            <p className="mt-1 text-sm text-ink/60">先选批量模式还是单篇模式。</p>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             {[
-              ["batch", "批量自动模式", "给一个素材文件夹，直接生成一周或两周的多篇帖子。"],
+              ["batch", "批量自动模式", "给一批图片，直接生成一周或两周的多篇帖子。"],
               ["single", "单篇精修模式", "先确定一篇笔记，再处理这一篇的图片、图集顺序和正文。"]
             ].map(([mode, title, desc]) => (
               <button
@@ -2944,29 +3296,25 @@ function ImagesPanel(props: {
                 event.preventDefault();
                 const form = new FormData(event.currentTarget);
                 const run = async () => {
-                  let imagePaths = String(form.get("openclawImagePaths") || "");
-                  const assetsDir = String(form.get("openclawAssetsDir") || "");
+                  let imagePaths = collectRemoteImageUrls(form).join("\n");
                   if (batchUploadFiles.length) {
                     const uploadData = await uploadFilesWithAuth(batchUploadFiles, {
                       tags: "批量自动模式上传",
                       suitableTypes: selected?.accountType || ""
                     });
-                    const uploadedPaths = (uploadData.assets || [])
-                      .map((asset) => asset.localFilePath || asset.filePath)
+                    const uploadedUrls = (uploadData.assets || [])
+                      .map((asset) => asset.fileUrl)
                       .filter(Boolean)
                       .join("\n");
-                    imagePaths = [imagePaths, uploadedPaths].filter(Boolean).join("\n");
+                    imagePaths = [imagePaths, uploadedUrls].filter(Boolean).join("\n");
+                    onAssetsAdded(uploadData.assets || []);
                   }
-
                   await generateBatchImagePosts({
                     weeks: String(form.get("weeks") || "1"),
-                    openclawAssetsDir: assetsDir,
                     openclawImagePaths: imagePaths,
                     planningGoal: String(form.get("planningGoal") || "")
                   });
-                  if (batchUploadFiles.length) {
-                    setBatchUploadFiles([]);
-                  }
+                  setBatchUploadFiles([]);
                 };
                 run().catch((error) => window.alert(error instanceof Error ? error.message : "生成批量帖子任务失败。"));
               }}
@@ -2985,18 +3333,16 @@ function ImagesPanel(props: {
                     <option value="2">两周，约 10-14 篇</option>
                   </select>
                 </label>
-                <Input
-                  name="openclawAssetsDir"
-                  label={`${accountKindLabel}文件夹${selected?.assets?.length ? `（已登记 ${selected?.assets.length} 张素材）` : ""}`}
-                  defaultValue={selected?.assetsPath || ""}
-                  placeholder="/Users/.../素材图片"
-                  help="把客户提供的一批素材图放在这个文件夹里。"
-                />
+                <div className="rounded border border-ink/10 bg-white p-3 text-sm leading-6 text-ink/60">
+                  {selected?.assets?.length
+                    ? `当前账号已登记 ${selected?.assets?.length ?? 0} 张素材，可直接在下方多选。`
+                    : `当前账号还没有素材，请先上传图片。`}
+                </div>
               </div>
 
               <div className="mt-3 grid gap-3">
                 <label className="field">
-                  <span>直接批量上传图片到后端素材库（可选）</span>
+                  <span>本次先上传图片到后端素材库（可选）</span>
                   <input
                     type="file"
                     accept="image/*"
@@ -3007,15 +3353,13 @@ function ImagesPanel(props: {
                       event.currentTarget.value = "";
                     }}
                   />
-                  <span className="text-xs text-ink/50">
-                    可以一次多选，也可以连续多次选择追加进去。Windows 下可按 `Ctrl` / `Shift` 多选。生成任务前会先走后端批量上传接口，再把这批图加入优先分析范围。
-                  </span>
+                  <span className="text-xs text-ink/50">支持一次多选，也可以连续追加。</span>
                 </label>
                 {batchUploadFiles.length > 0 && (
                   <div className="rounded border border-teal/20 bg-teal/5 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="text-sm font-medium text-teal">
-                        已选择 {summarizeFiles(batchUploadFiles).count} 张图，合计 {formatFileSize(summarizeFiles(batchUploadFiles).totalBytes)}
+                        本次待上传 {summarizeFiles(batchUploadFiles).count} 张图，合计 {formatFileSize(summarizeFiles(batchUploadFiles).totalBytes)}
                       </div>
                       <button type="button" className="text-xs text-ink/55 underline-offset-2 hover:underline" onClick={() => setBatchUploadFiles([])}>
                         清空本次选择
@@ -3028,6 +3372,11 @@ function ImagesPanel(props: {
                     </div>
                   </div>
                 )}
+                <RemoteAssetPicker
+                  assets={selected?.assets || []}
+                  pickerLabel="本次要分析的远程图片"
+                  pickerHelp="从当前账号素材库里多选；没有素材就先上传图片。"
+                />
                 <Textarea
                   name="planningGoal"
                   label="批量生成要求"
@@ -3035,12 +3384,6 @@ function ImagesPanel(props: {
                   onChange={setWeddingPlanningGoal}
                   placeholder={defaultBatchGoal}
                   help="这会写进给龙虾的批量任务。"
-                />
-                <Textarea
-                  name="openclawImagePaths"
-                  label="优先分析的图片（可选）"
-                  placeholder={isWedding ? "婚礼蛋糕.jpg\n香槟色花艺.jpg\n仪式区拱门.jpg\n迎宾牌.jpg" : "封面候选.jpg\n现场图.jpg\n信息截图.jpg"}
-                  help="通常不用填；只有想让龙虾优先看某几张图时再填。"
                 />
               </div>
 
@@ -3054,7 +3397,7 @@ function ImagesPanel(props: {
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                   <h2 className="section-title">批量任务结果</h2>
-                  <p className="mt-1 text-sm text-ink/60">一条任务给龙虾：读取文件夹、自动分组选题、生成多篇帖子。</p>
+                  <p className="mt-1 text-sm text-ink/60">一条任务给龙虾：读图、分组选题、生成多篇帖子。</p>
                 </div>
                 <div className="flex gap-2">
                   <IconButton title="复制批量任务" onClick={() => copy(batchImagePostResult?.planningPrompt.content || "")} icon={<Clipboard size={17} />} />
@@ -3090,29 +3433,27 @@ function ImagesPanel(props: {
                 if (!note) return;
                 const form = new FormData(event.currentTarget);
                 const run = async () => {
-                  let imagePaths = String(form.get("openclawImagePaths") || "");
-                  let assetsDir = String(form.get("openclawAssetsDir") || "");
-                  if (singleSourceMode === "manual_images") {
-                    if (singleManualFiles.length) {
-                      const uploadData = await uploadFilesWithAuth(singleManualFiles, {
-                        tags: "单篇精修上传",
-                        suitableTypes: note.topicTitle
-                      });
-                      imagePaths = (uploadData.assets || []).map((asset: { filePath: string; localFilePath?: string }) => asset.localFilePath || asset.filePath).join("\n");
-                      assetsDir = selected?.assetsPath || assetsDir;
-                    }
+                  let imagePaths = collectRemoteImageUrls(form).join("\n");
+                  if (singleUploadFiles.length) {
+                    const uploadData = await uploadFilesWithAuth(singleUploadFiles, {
+                      tags: "单篇精修上传",
+                      suitableTypes: note.topicTitle
+                    });
+                    const uploadedUrls = (uploadData.assets || [])
+                      .map((asset) => asset.fileUrl)
+                      .filter(Boolean)
+                      .join("\n");
+                    imagePaths = [imagePaths, uploadedUrls].filter(Boolean).join("\n");
+                    onAssetsAdded(uploadData.assets || []);
                   }
                   await generateImagePrompt(note, {
-                  imageSourceMode: singleSourceMode,
-                  noteContent: String(form.get("noteContent") || ""),
-                  singleGoal: String(form.get("singleGoal") || ""),
-                  imageCount: String(form.get("imageCount") || ""),
-                    openclawAssetsDir: assetsDir,
+                    imageSourceMode: singleSourceMode,
+                    noteContent: String(form.get("noteContent") || ""),
+                    singleGoal: String(form.get("singleGoal") || ""),
+                    imageCount: String(form.get("imageCount") || ""),
                     openclawImagePaths: imagePaths
                   });
-                  if (singleSourceMode === "manual_images" && singleManualFiles.length) {
-                    setSingleManualFiles([]);
-                  }
+                  setSingleUploadFiles([]);
                 };
                 run().catch((error) => window.alert(error instanceof Error ? error.message : "生成单篇图片方案失败。"));
               }}
@@ -3138,10 +3479,9 @@ function ImagesPanel(props: {
 
               <div className="mt-4">
                 <div className="mb-2 text-sm font-medium text-ink/70">图片来源</div>
-                <div className="grid gap-2 md:grid-cols-3">
+                <div className="grid gap-2 md:grid-cols-2">
                   {[
-                    ["folder_select", "文件夹自动选图", "给一个文件夹，让龙虾按这篇笔记自动挑图。"],
-                    ["manual_images", "手动指定图片", "已经挑好图片，让系统排序、写图上文字和正文。"],
+                    ["remote_images", "多张远程图片", "从素材库多选已经上传到后端的图片。"],
                     ["ai_generate", "AI 辅助图", "没有真实图时，只生成信息卡、结构图或低拟真辅助画面。"]
                   ].map(([mode, title, desc]) => (
                     <button
@@ -3177,59 +3517,57 @@ function ImagesPanel(props: {
                 />
                 <div className="grid gap-3 md:grid-cols-[120px_1fr]">
                   <Input name="imageCount" label="图片数量" defaultValue={singleImageCount} onChange={setSingleImageCount} placeholder="5" />
-                  {singleSourceMode === "manual_images" ? (
+                  {singleSourceMode === "remote_images" ? (
                     <div className="rounded border border-ink/10 bg-white p-3 text-sm leading-6 text-ink/60">
-                      上传的图片会先进入当前账号的服务端素材库，再写入这篇任务的优先图片列表。
+                      这篇笔记会直接使用你选择的图片。
                     </div>
                   ) : (
-                    <Input
-                      name="openclawAssetsDir"
-                      label={singleSourceMode === "ai_generate" ? "参考素材文件夹（可选）" : "图片文件夹"}
-                      defaultValue={selected?.assetsPath || ""}
-                      placeholder="/Users/.../素材图片"
-                      help={singleSourceMode === "ai_generate" ? "AI 辅助图不作为真实证据图；有真实素材时仍优先使用真实素材。" : "给一个文件夹，让龙虾从里面自动挑选适合这篇笔记的图片。"}
-                    />
+                    <div className="rounded border border-ink/10 bg-white p-3 text-sm leading-6 text-ink/60">
+                      AI 辅助图不作为真实证据图；有真实素材时仍优先使用真实素材。
+                    </div>
                   )}
                 </div>
-                {singleSourceMode === "manual_images" && (
-                  <label className="field">
-                    <span>上传这篇要用的图片</span>
-                    <input
-                      name="manualImageFiles"
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      required
-                      onChange={(event) => {
-                        const nextFiles = Array.from(event.target.files || []);
-                        setSingleManualFiles((current) => mergeFiles(current, nextFiles));
-                        event.currentTarget.value = "";
-                      }}
-                    />
-                    <span className="text-xs leading-5 text-ink/50">
-                      可以一次多选，也可以连续多次选择追加进去。提交时会先批量上传到服务端素材库，再把这批图加入当前任务的优先图片列表。
-                    </span>
-                  </label>
-                )}
-                {singleSourceMode === "manual_images" && singleManualFiles.length > 0 && (
-                  <div className="rounded border border-teal/20 bg-teal/5 p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-sm font-medium text-teal">
-                        本篇已选择 {summarizeFiles(singleManualFiles).count} 张图，合计 {formatFileSize(summarizeFiles(singleManualFiles).totalBytes)}
+                {singleSourceMode === "remote_images" && (
+                  <>
+                    <label className="field">
+                      <span>本篇先上传图片到后端素材库（可选）</span>
+                      <input
+                        name="singleUploadFiles"
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={(event) => {
+                          const nextFiles = Array.from(event.target.files || []);
+                          setSingleUploadFiles((current) => mergeFiles(current, nextFiles));
+                          event.currentTarget.value = "";
+                        }}
+                      />
+                      <span className="text-xs leading-5 text-ink/50">支持一次多选，也可以连续追加。</span>
+                    </label>
+                    {singleUploadFiles.length > 0 && (
+                      <div className="rounded border border-teal/20 bg-teal/5 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-sm font-medium text-teal">
+                            本篇待上传 {summarizeFiles(singleUploadFiles).count} 张图，合计 {formatFileSize(summarizeFiles(singleUploadFiles).totalBytes)}
+                          </div>
+                          <button type="button" className="text-xs text-ink/55 underline-offset-2 hover:underline" onClick={() => setSingleUploadFiles([])}>
+                            清空本次选择
+                          </button>
+                        </div>
+                        <div className="mt-2 max-h-28 overflow-auto rounded bg-white/80 px-3 py-2 text-xs text-ink/65">
+                          {singleUploadFiles.map((file) => (
+                            <div key={`${file.name}-${file.size}-${file.lastModified}`}>{file.name} · {formatFileSize(file.size)}</div>
+                          ))}
+                        </div>
                       </div>
-                      <button type="button" className="text-xs text-ink/55 underline-offset-2 hover:underline" onClick={() => setSingleManualFiles([])}>
-                        清空本次选择
-                      </button>
-                    </div>
-                    <div className="mt-2 max-h-28 overflow-auto rounded bg-white/80 px-3 py-2 text-xs text-ink/65">
-                      {singleManualFiles.map((file) => (
-                        <div key={`${file.name}-${file.size}-${file.lastModified}`}>{file.name} · {formatFileSize(file.size)}</div>
-                      ))}
-                    </div>
-                  </div>
+                    )}
+                    <RemoteAssetPicker
+                      assets={selected?.assets || []}
+                      pickerLabel="这篇要用的远程图片"
+                      pickerHelp="可以一次多选账号素材库里已经上传到后端的远程图。"
+                    />
+                  </>
                 )}
-                {singleSourceMode === "manual_images" && <input type="hidden" name="openclawAssetsDir" value={selected?.assetsPath || ""} readOnly />}
-                {singleSourceMode !== "manual_images" && <input type="hidden" name="openclawImagePaths" value="" readOnly />}
                 <Textarea
                   name="singleGoal"
                   label="本篇精修要求"
@@ -3240,7 +3578,7 @@ function ImagesPanel(props: {
               </div>
 
               <button type="submit" disabled={loading || !note} className="primary-button mt-4">
-                <ImageIcon size={17} /> {singleSourceMode === "ai_generate" ? "生成 AI 辅助图方案" : singleSourceMode === "manual_images" ? "用指定图片生成单篇方案" : "让龙虾从文件夹自动选图"}
+                <ImageIcon size={17} /> {singleSourceMode === "ai_generate" ? "生成 AI 辅助图方案" : "用远程多图生成单篇方案"}
               </button>
             </form>
 
@@ -3348,23 +3686,22 @@ function ImagesPanel(props: {
               const form = new FormData(event.currentTarget);
               generateBatchImagePosts({
                 weeks: String(form.get("weeks") || "1"),
-                openclawAssetsDir: String(form.get("openclawAssetsDir") || ""),
-                openclawImagePaths: String(form.get("openclawImagePaths") || ""),
+                openclawImagePaths: collectRemoteImageUrls(form).join("\n"),
                 planningGoal: String(form.get("planningGoal") || "")
               });
             }}
           >
             <div className="mb-4">
               <div className="mb-2 inline-flex rounded bg-teal/10 px-3 py-1 text-xs font-semibold text-teal">婚礼账号优先流程</div>
-              <h2 className="section-title">用婚礼现场图自动生成选题规划</h2>
+              <h2 className="section-title">用婚礼远程图片自动生成选题规划</h2>
               <p className="mt-1 text-sm text-ink/60">
-                运营者只需要准备图片文件夹，系统会生成给龙虾的 Prompt：先读图找细节，再研究同行爆款风格，最后输出一周或两周笔记规划。
+                先上传婚礼图片，系统会自动读图找细节，再生成一周或两周笔记规划。
               </p>
             </div>
 
             <div className="mb-4 grid gap-3 md:grid-cols-3">
-              {[
-                ["1", "放入婚礼图片", "建议 20-40 张，文件名尽量写清细节。"],
+              {[ 
+                ["1", "准备婚礼远程图片", "建议 20-40 张，优先能直接访问的大图 URL。"],
                 ["2", "生成龙虾 Prompt", "让龙虾读图并研究小红书爆款。"],
                 ["3", "得到周计划", "输出标题、配图顺序、正文方向和风险核验。"]
               ].map(([step, title, desc]) => (
@@ -3384,16 +3721,19 @@ function ImagesPanel(props: {
                   <option value="2">两周规划</option>
                 </select>
               </label>
-              <Input
-                name="openclawAssetsDir"
-                label={`婚礼图片文件夹${selected?.assets?.length ? `（已登记 ${selected?.assets.length} 张素材）` : ""}`}
-                defaultValue={selected?.assetsPath || ""}
-                placeholder="/Users/.../婚礼现场图"
-                help="可以填客户图片所在文件夹；不填则默认使用当前账号素材库。"
-              />
+              <div className="rounded border border-ink/10 bg-white p-3 text-sm leading-6 text-ink/60">
+                {selected?.assets?.length
+                  ? `当前账号已登记 ${selected?.assets?.length ?? 0} 张婚礼素材，可直接在下方多选。`
+                  : "当前账号还没有婚礼素材，请先上传图片。"}
+              </div>
             </div>
 
             <div className="mt-3 grid gap-3">
+              <RemoteAssetPicker
+                assets={selected?.assets || []}
+                pickerLabel="本次要分析的婚礼远程图片"
+                pickerHelp="从当前账号婚礼素材里多选；没有素材就先上传图片。"
+              />
               <div>
                 <div className="mb-2 text-sm font-medium text-ink/70">本次希望龙虾重点完成什么？</div>
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -3420,12 +3760,6 @@ function ImagesPanel(props: {
                 placeholder="例如：重点挖掘婚礼蛋糕、法式花艺和仪式区细节；希望提升备婚咨询。"
                 help="可以直接用上面的预设，也可以改成客户自己的诉求。"
               />
-              <Textarea
-                name="openclawImagePaths"
-                label="只指定部分图片（可选）"
-                placeholder={"婚礼蛋糕.jpg\n香槟色花艺.jpg\n仪式区拱门.jpg\n迎宾牌.jpg"}
-                help="通常不用填，龙虾会读取整个文件夹。只有想优先分析某几张图时再填写。"
-              />
             </div>
 
             <button type="submit" disabled={loading || !selected} className="primary-button mt-4">
@@ -3445,8 +3779,8 @@ function ImagesPanel(props: {
             if (!note) return;
             const form = new FormData(event.currentTarget);
             generateImagePrompt(note, {
-              openclawAssetsDir: String(form.get("openclawAssetsDir") || ""),
-              openclawImagePaths: String(form.get("openclawImagePaths") || "")
+              imageSourceMode: "remote_images",
+              openclawImagePaths: collectRemoteImageUrls(form).join("\n")
             });
           }}
         >
@@ -3486,14 +3820,12 @@ function ImagesPanel(props: {
           )}
 
           <details className="mt-4 rounded border border-ink/10 bg-white p-3">
-            <summary className="cursor-pointer text-sm font-medium">指定要使用的素材（可选）</summary>
+            <summary className="cursor-pointer text-sm font-medium">指定要使用的已上传素材（可选）</summary>
             <div className="mt-3 grid gap-3">
-              <Input name="openclawAssetsDir" label="素材文件夹" defaultValue={selected?.assetsPath || ""} placeholder={copyText.assetsDirPlaceholder} />
-              <Textarea
-                name="openclawImagePaths"
-                label="指定图片文件名或路径"
-                placeholder={copyText.imagePathsPlaceholder}
-                help="默认读取当前账号素材目录；如果客户图片在另一个本机文件夹，填那个文件夹路径。"
+              <RemoteAssetPicker
+                assets={selected?.assets || []}
+                pickerLabel="这篇要用的已上传素材"
+                pickerHelp="可以从账号素材库多选已经上传到后端的远程图。"
               />
             </div>
           </details>
@@ -3831,23 +4163,24 @@ function InteractionsPanel(props: {
 
 function DraftPanel({ note, saveDraft }: { note?: NoteTask; saveDraft: (event: React.FormEvent<HTMLFormElement>) => void }) {
   if (!note) return <div className="panel"><EmptyState text="先选择或生成一篇本周内容。" /></div>;
+  const draft = parseDraftContent(note.bodyDraft);
   return (
     <form className="panel" onSubmit={saveDraft}>
       <h2 className="section-title">保存 skill 返回的草稿结果</h2>
       <p className="mb-4 text-sm text-ink/60">{note.topicTitle}</p>
       <div className="grid gap-3 md:grid-cols-2">
-        <Textarea name="titleCandidates" label="标题候选" />
-        <Input name="finalTitle" label="最终标题" />
-        <Textarea name="coverCopyCandidates" label="封面文案候选" />
-        <Input name="finalCoverCopy" label="最终封面文案" />
-        <Textarea name="body" label="正文" />
-        <Textarea name="imageOrderAdvice" label="图片排序建议" />
-        <Textarea name="imageCaptions" label="每张图配文" />
-        <Input name="tags" label="标签" />
-        <Textarea name="commentGuide" label="评论区引导" />
-        <Textarea name="publishAdvice" label="发布建议" />
-        <Input name="publishStatus" label="发布状态" defaultValue="未发布" />
-        <Textarea name="rawResult" label="原始返回内容" />
+        <Textarea name="titleCandidates" label="标题候选" defaultValue={draft.titleCandidates || ""} />
+        <Input name="finalTitle" label="最终标题" defaultValue={draft.finalTitle || ""} />
+        <Textarea name="coverCopyCandidates" label="封面文案候选" defaultValue={draft.coverCopyCandidates || ""} />
+        <Input name="finalCoverCopy" label="最终封面文案" defaultValue={draft.finalCoverCopy || ""} />
+        <Textarea name="body" label="正文" defaultValue={draft.body || ""} />
+        <Textarea name="imageOrderAdvice" label="图片排序建议" defaultValue={draft.imageOrderAdvice || ""} />
+        <Textarea name="imageCaptions" label="每张图配文" defaultValue={draft.imageCaptions || ""} />
+        <Input name="tags" label="标签" defaultValue={draft.tags || ""} />
+        <Textarea name="commentGuide" label="评论区引导" defaultValue={draft.commentGuide || ""} />
+        <Textarea name="publishAdvice" label="发布建议" defaultValue={draft.publishAdvice || ""} />
+        <Input name="publishStatus" label="发布状态" defaultValue={draft.publishStatus || "未发布"} />
+        <Textarea name="rawResult" label="原始返回内容" defaultValue={draft.rawResult || ""} />
       </div>
       <button type="submit" className="primary-button mt-4">
         <Save size={17} /> 保存草稿结果
@@ -4493,7 +4826,7 @@ function weeklyPresets(accountType: string) {
         testHypothesis: "图片文件名直接使用菜名，系统按菜名匹配图片和正文，会比人工挑图更稳定。",
         commercializationMove: "轻量提到预约、套餐或适合几人来吃，不做强促销。",
         interactionGoal: "每篇引导用户留言想看哪道菜、几个人来、有没有忌口、是否需要停车信息。",
-        availableAssets: "把图片放到龙虾所在电脑的本地文件夹；文件名用菜名或环境名，例如 清蒸鲈鱼.jpg、竹林土鸡.jpg、包间.jpg、门头.jpg。"
+        availableAssets: "先把图片上传到后端素材库；文件名尽量体现菜名或环境名，方便后续自动识别。"
       },
       {
         name: "活动转化",

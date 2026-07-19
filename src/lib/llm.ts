@@ -1,4 +1,6 @@
 import type { Account, AccountStrategy, AccountTypeTemplate, Asset, NoteTask, WeeklyPlan } from "@prisma/client";
+import { getBackendApiBaseUrl } from "@/lib/backendApi";
+import { completeWithBackendAi } from "@/lib/backendAiClient";
 import type { StrategyBundle } from "@/lib/strategy";
 import { fallbackReferenceSummary } from "@/lib/referenceResearch";
 import { fallbackInteractionSummary } from "@/lib/interactionPrompts";
@@ -41,9 +43,9 @@ type WeeklyPlanInput = {
 
 export function getLlmStatus() {
   return {
-    enabled: Boolean(process.env.OPENAI_API_KEY),
-    model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
-    baseUrl: process.env.OPENAI_BASE_URL || "https://api.openai.com/v1"
+    enabled: true,
+    model: process.env.OPENAI_MODEL || "gpt-5.5",
+    baseUrl: `${getBackendApiBaseUrl()}/ai/v1/complete`
   };
 }
 
@@ -53,7 +55,7 @@ export async function generateStrategyWithLlm(
   fallback: StrategyBundle
 ): Promise<LlmResult<StrategyBundle>> {
   const status = getLlmStatus();
-  if (!status.enabled) return { usedLlm: false, data: fallback, error: "OPENAI_API_KEY 未配置，已使用内置模板生成。" };
+  if (!status.enabled) return { usedLlm: false, data: fallback, error: "后端 AI 未启用，已使用内置模板生成。" };
 
   const prompt = `请为一个小红书账号生成完整运营策划案和 AGENTS.md。
 
@@ -153,7 +155,7 @@ export async function regenerateStrategyFromReferenceResearchWithLlm(input: {
 }): Promise<LlmResult<StrategyBundle>> {
   const status = getLlmStatus();
   if (!status.enabled) {
-    return { usedLlm: false, data: input.fallback, error: "OPENAI_API_KEY 未配置，无法基于参考账号研究重生成策划案与 AGENTS.md。" };
+      return { usedLlm: false, data: input.fallback, error: "后端 AI 未启用，无法基于参考账号研究重生成策划案与 AGENTS.md。" };
   }
 
   const prompt = `请严格基于“参考账号研究结果”重生成小红书账号策划案和 AGENTS.md。
@@ -233,7 +235,7 @@ export async function generateWeeklyTasksWithLlm(input: {
   fallbackTasks: NoteTaskSeed[];
 }): Promise<LlmResult<NoteTaskSeed[]>> {
   const status = getLlmStatus();
-  if (!status.enabled) return { usedLlm: false, data: input.fallbackTasks, error: "OPENAI_API_KEY 未配置，已使用内置模板生成。" };
+  if (!status.enabled) return { usedLlm: false, data: input.fallbackTasks, error: "后端 AI 未启用，已使用内置模板生成。" };
 
   const prompt = `请根据账号策略、本周目标和素材情况，生成一周小红书 note_tasks。
 
@@ -338,7 +340,7 @@ export async function summarizeReferenceResearchWithLlm(input: {
 }): Promise<LlmResult<{ summaryMarkdown: string; contentFeatures: string; personaInsights: string; strategyInsights: string }>> {
   const fallback = fallbackReferenceSummary(input.rawResults);
   const status = getLlmStatus();
-  if (!status.enabled) return { usedLlm: false, data: fallback, error: "OPENAI_API_KEY 未配置，已保存原始结果并使用占位总结。" };
+  if (!status.enabled) return { usedLlm: false, data: fallback, error: "后端 AI 未启用，已保存原始结果并使用占位总结。" };
 
   const prompt = `请总结 xiaohongshu_auto_op 返回的同类型参考账号研究结果，并给出我方账号策划建议。
 
@@ -397,7 +399,7 @@ export async function summarizeInteractionCandidatesWithLlm(input: {
 }): Promise<LlmResult<{ targetUsersMarkdown: string; commentDraftsMarkdown: string }>> {
   const fallback = fallbackInteractionSummary(input.rawResults);
   const status = getLlmStatus();
-  if (!status.enabled) return { usedLlm: false, data: fallback, error: "OPENAI_API_KEY 未配置，已保存原始结果并使用人工整理框架。" };
+  if (!status.enabled) return { usedLlm: false, data: fallback, error: "后端 AI 未启用，已保存原始结果并使用人工整理框架。" };
 
   const prompt = `请分析 xiaohongshu_auto_op 返回的目标用户搜索结果，并生成评论互动策略。
 
@@ -466,7 +468,7 @@ export async function summarizeImageStyleStudyWithLlm(input: {
 }): Promise<LlmResult<{ summaryMarkdown: string; styleBrief: string[] }>> {
   const fallback = summarizeImageStyleStudyFallback(input.account, input.rawResults);
   const status = getLlmStatus();
-  if (!status.enabled) return { usedLlm: false, data: fallback, error: "OPENAI_API_KEY 未配置，已使用本地规则整理图片风格摘要。" };
+  if (!status.enabled) return { usedLlm: false, data: fallback, error: "后端 AI 未启用，已使用本地规则整理图片风格摘要。" };
 
   const prompt = `请总结 xiaohongshu_auto_op 返回的小红书图片风格研究结果。
 
@@ -518,126 +520,24 @@ JSON 字段：
 
 async function createTextResponse(input: { instructions: string; input: string }): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const status = getLlmStatus();
-  const baseUrl = status.baseUrl.replace(/\/$/, "");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("backend ai timeout"), 8 * 60 * 1000);
+
   try {
-    const response = await fetch(`${baseUrl}/responses`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({
-        model: status.model,
-        instructions: input.instructions,
-        input: input.input,
-        store: false
-      })
+    const response = await completeWithBackendAi({
+      model: status.model,
+      instructions: input.instructions,
+      input: input.input,
+      signal: controller.signal
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      const shouldFallbackToChat =
-        response.status === 404 ||
-        response.status === 405 ||
-        (response.status === 400 && looksLikeUnsupportedResponses(errorText));
-      if (!shouldFallbackToChat) {
-        return { ok: false, error: `OpenAI API ${response.status}: ${errorText.slice(0, 600)}` };
-      }
-      return createChatCompletionResponse(input, baseUrl, status.model);
-    }
-
-    const json = await response.json();
-    const text = extractText(json);
-    if (!text) return { ok: false, error: "OpenAI API 没有返回文本内容。" };
-    return { ok: true, text };
+    if (!response.ok) return { ok: false, error: response.error };
+    return { ok: true, text: response.text };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "OpenAI API 调用失败。" };
+    return { ok: false, error: error instanceof Error ? error.message : "后端 AI 调用失败。" };
+  } finally {
+    clearTimeout(timeout);
   }
-}
-
-async function createChatCompletionResponse(
-  input: { instructions: string; input: string },
-  baseUrl: string,
-  model: string
-): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
-  try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: input.instructions },
-          { role: "user", content: input.input }
-        ],
-        stream: false
-      })
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      return { ok: false, error: `Chat Completions API ${response.status}: ${errorText.slice(0, 600)}` };
-    }
-
-    const json = await response.json();
-    const text = extractChatCompletionText(json);
-    if (!text) return { ok: false, error: "Chat Completions API 没有返回文本内容。" };
-    return { ok: true, text };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "Chat Completions API 调用失败。" };
-  }
-}
-
-function looksLikeUnsupportedResponses(text: string) {
-  const lower = text.toLowerCase();
-  return (
-    lower.includes("not found") ||
-    lower.includes("404") ||
-    lower.includes("unsupported") ||
-    lower.includes("unknown") ||
-    lower.includes("invalid url") ||
-    lower.includes("no route") ||
-    lower.includes("route")
-  );
-}
-
-function extractText(json: unknown) {
-  if (!json || typeof json !== "object") return "";
-  const record = json as Record<string, unknown>;
-  if (typeof record.output_text === "string") return record.output_text;
-  const output = Array.isArray(record.output) ? record.output : [];
-  return output
-    .flatMap((item) => {
-      if (!item || typeof item !== "object") return [];
-      const content = (item as Record<string, unknown>).content;
-      return Array.isArray(content) ? content : [];
-    })
-    .map((part) => {
-      if (!part || typeof part !== "object") return "";
-      const item = part as Record<string, unknown>;
-      return typeof item.text === "string" ? item.text : "";
-    })
-    .filter(Boolean)
-    .join("\n");
-}
-
-function extractChatCompletionText(json: unknown) {
-  if (!json || typeof json !== "object") return "";
-  const choices = (json as Record<string, unknown>).choices;
-  if (!Array.isArray(choices)) return "";
-  return choices
-    .map((choice) => {
-      if (!choice || typeof choice !== "object") return "";
-      const message = (choice as Record<string, unknown>).message;
-      if (!message || typeof message !== "object") return "";
-      const content = (message as Record<string, unknown>).content;
-      return typeof content === "string" ? content : "";
-    })
-    .filter(Boolean)
-    .join("\n");
 }
 
 function extractJson(text: string): Record<string, unknown> | null {

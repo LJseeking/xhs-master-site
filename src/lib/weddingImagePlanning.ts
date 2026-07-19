@@ -9,7 +9,6 @@ type WeddingPlanAccount = Account & {
 
 type WeddingPlanOptions = {
   weeks: number;
-  openclawAssetsDir?: string;
   openclawImagePaths?: string;
   planningGoal?: string;
 };
@@ -24,7 +23,7 @@ function compact(value: string | null | undefined, fallback = "未填写") {
 }
 
 function assetLines(assets: Asset[] | undefined) {
-  if (!assets?.length) return "- 后台还没有登记素材；请优先读取用户填写的素材文件夹。";
+  if (!assets?.length) return "- 后台还没有登记婚礼素材；请优先读取用户刚上传到后端的婚礼图片链接。";
   return assets
     .slice(0, 60)
     .map((asset, index) => {
@@ -57,17 +56,16 @@ function latestStyleBrief(account: WeddingPlanAccount) {
 export function buildWeddingImagePlanPrompt(account: WeddingPlanAccount, options: WeddingPlanOptions) {
   const weeks = options.weeks === 2 ? 2 : 1;
   const targetCount = weeks === 2 ? "10-14 篇" : "5-7 篇";
-  const assetsDir = compact(options.openclawAssetsDir || account.assetsPath, "请填写龙虾可访问的婚礼图片文件夹");
-  const specifiedImages = compact(options.openclawImagePaths, "未指定，默认扫描素材文件夹内全部图片，优先处理约 30 张婚礼现场图。");
+  const specifiedImages = compact(options.openclawImagePaths, "未指定；请先在前端选择已经上传到后端的婚礼图片。");
   const planningGoal = compact(options.planningGoal, "优先从真实婚礼图片里找高收藏细节，直接形成可执行的小红书批量帖子方案。");
 
   return `# 给龙虾 skill 的婚礼批量帖子生成 Prompt
 
 ## 当前执行模式
-只读研究 + 本地图片分析 + 生成方案。不得发布、评论、点赞、收藏、关注或私信。
+只读研究 + 远程图片分析 + 生成方案。不得发布、评论、点赞、收藏、关注或私信。
 
 ## 任务目标
-客户会提供约 30 张真实婚礼现场图片。请你先读取这些图片，识别图片中的优秀细节；再只读研究小红书全国范围内同类型婚礼公司、婚礼策划、婚礼布置、备婚灵感类爆款笔记；最后把“真实图片特点”和“全国同行爆款表达方式”合并，直接输出 ${weeks} 周小红书批量帖子方案（${targetCount}）。
+客户会先上传约 30 张真实婚礼现场图片到后端素材库。请你读取这些后端返回的图片链接，识别图片中的优秀细节；再只读研究小红书全国范围内同类型婚礼公司、婚礼策划、婚礼布置、备婚灵感类爆款笔记；最后把“真实图片特点”和“全国同行爆款表达方式”合并，直接输出 ${weeks} 周小红书批量帖子方案（${targetCount}）。
 
 重要原则：同行爆款内容分析不能局限在账号当地。必须优先搜索全国同类型热门内容，充分学习成熟账号的标题节奏、封面文字、图集顺序、细节命名、情绪表达和评论痛点；本地城市内容只作为落地差异、价格语境、用户咨询习惯的补充对照，不能限制整体风格。
 
@@ -87,9 +85,9 @@ export function buildWeddingImagePlanPrompt(account: WeddingPlanAccount, options
 ## 本次额外目标
 ${planningGoal}
 
-## 本地图片输入
-- 素材文件夹：${assetsDir}
-- 指定图片文件名或路径：${specifiedImages}
+## 远程图片输入
+- 指定婚礼已上传图片链接：
+${specifiedImages}
 
 ## 后台已登记素材
 ${assetLines(account.assets)}
@@ -101,8 +99,8 @@ ${latestReferenceBrief(account)}
 ${latestStyleBrief(account)}
 
 ## 第一步：批量读图，建立婚礼图片清单
-请扫描素材文件夹或指定图片，输出一张 Markdown 表格。每张图至少判断：
-1. 文件名/路径。
+请读取这些婚礼已上传图片链接，输出一张 Markdown 表格。每张图至少判断：
+1. 文件名/URL。
 2. 画面主体：婚礼蛋糕、甜品台、花艺、仪式区、迎宾区、桌花、席位卡、菜单卡、手捧花、灯光、布幔、合影区、誓言本、戒指、请柬、宾客互动、场布全景等。
 3. 细节亮点：色系、材质、花材、层次、动线、仪式感、宾客体验、镜头角度、可被新人收藏的理由。
 4. 适合写成什么选题：蛋糕细节、花艺预算沟通、仪式区灵感、迎宾区高级感、桌面布置、备婚避坑、婚礼风格命名等。
@@ -156,13 +154,11 @@ ${latestStyleBrief(account)}
 export function buildWeddingImagePlanCommands(account: WeddingPlanAccount, options: WeddingPlanOptions & { promptFile: string }) {
   const base = "uv run xiaohongshu_auto_op";
   const accountFlag = `--account ${q(account.accountParam)}`;
-  const assetsDir = options.openclawAssetsDir || account.assetsPath || "填写龙虾可访问的婚礼图片文件夹";
-
   return [
     {
       category: "批量分析婚礼现场图片并生成帖子",
-      command: `${base} xhs-content-ops draft-note --prompt-file ${q(options.promptFile)} --assets-dir ${q(assetsDir)} ${accountFlag} --safe-mode`,
-      description: `读取约 30 张婚礼现场图，先识别蛋糕、花艺、仪式区、迎宾区、桌花、席位卡等细节，再结合全国同行爆款研究，输出 ${options.weeks === 2 ? "两周" : "一周"}批量帖子方案。`,
+      command: `${base} xhs-content-ops draft-note --prompt-file ${q(options.promptFile)} ${accountFlag} --safe-mode`,
+      description: `读取约 30 张婚礼远程图片，先识别蛋糕、花艺、仪式区、迎宾区、桌花、席位卡等细节，再结合全国同行爆款研究，输出 ${options.weeks === 2 ? "两周" : "一周"}批量帖子方案。`,
       safetyNote: "只生成规划和草稿建议；新人肖像、场地、价格、档期、套餐和授权必须人工核验。"
     }
   ];

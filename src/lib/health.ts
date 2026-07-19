@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { prisma } from "@/lib/prisma";
 import { getLlmStatus } from "@/lib/llm";
 
 const execFileAsync = promisify(execFile);
@@ -25,6 +24,15 @@ async function readHead(p: string, max = 1200) {
   }
 }
 
+async function countChildren(p: string) {
+  try {
+    const entries = await fs.readdir(p, { withFileTypes: true });
+    return entries.filter((entry) => !entry.name.startsWith(".")).length;
+  } catch {
+    return 0;
+  }
+}
+
 export async function getSystemHealth() {
   const root = process.cwd();
   const xhsPath = process.env.XHS_AUTO_OP_PATH || "../xiaohongshu_auto_op";
@@ -40,13 +48,12 @@ export async function getSystemHealth() {
     uvVersion = "uv 不可用";
   }
 
-  const [profilesExists, assetsExists, memorySummary, recentLogs, accountCount, assetCount] = await Promise.all([
+  const [profilesExists, assetsExists, memorySummary, accountCount, assetCount] = await Promise.all([
     exists(path.join(root, "profiles")),
     exists(path.join(root, "assets")),
     readHead(path.resolve(root, memoryPath)),
-    prisma.systemLog.findMany({ orderBy: { createdAt: "desc" }, take: 8 }),
-    prisma.account.count(),
-    prisma.asset.count()
+    countChildren(path.join(root, "profiles")),
+    countChildren(path.join(root, "assets"))
   ]);
 
   return {
@@ -59,13 +66,14 @@ export async function getSystemHealth() {
     assets: { exists: assetsExists, path: path.join(root, "assets") },
     uv: { available: uvAvailable, version: uvVersion },
     counts: { accounts: accountCount, assets: assetCount },
-    recentFailures: recentLogs.filter((log) => log.level === "error"),
+    recentFailures: [],
     diagnostics: [
       "当前网站不会执行真实发布、评论、点赞、收藏或私信。",
       profilesExists ? "profiles 目录可用。" : "profiles 目录缺失。",
       assetsExists ? "assets 目录可用。" : "assets 目录缺失。",
       uvAvailable ? `uv 可用：${uvVersion}` : "uv 不可用，请安装 uv 后再复制命令执行。",
-      llm.enabled ? `OpenAI API 已配置，模型：${llm.model}` : "OpenAI API 未配置，将使用内置模板生成。"
+      llm.enabled ? `OpenAI API 已配置，模型：${llm.model}` : "OpenAI API 未配置，将使用内置模板生成。",
+      "本地 SQLite/Prisma 运行时已移除；账号与内容主数据走后端，衍生研究数据走浏览器缓存。"
     ]
   };
 }

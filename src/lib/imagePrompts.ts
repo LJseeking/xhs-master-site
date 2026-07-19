@@ -169,7 +169,7 @@ function modeCopy(accountType: string) {
     },
     food: {
       sourceHint: "优先按文件名识别真实菜品图和环境图；图片文件名应尽量就是菜品名或环境名，例如 清蒸鲈鱼.jpg、竹林土鸡.jpg、包间.jpg、门头.jpg、停车场入口.jpg。图 1/2/3 用菜品图做 image2，图 4/5 用环境图轻处理，图 6 用真实门头/停车/道路信息生成交通指南漫画卡。",
-      noSourceHint: "未提供图片：请先输出本地文件夹整理清单，要求客户把图片存到龙虾所在电脑可访问目录，并按菜品名、环境名或交通节点命名；如必须出图，只能生成低拟真辅助图或信息卡，不得伪装为真实菜品或真实门店。",
+      noSourceHint: "未提供图片：请先输出待上传图片清单，要求客户先把图片上传到后端素材库，并尽量按菜品名、环境名或交通节点命名；如必须出图，只能生成低拟真辅助图或信息卡，不得伪装为真实菜品或真实门店。",
       promptTitle: "餐饮图片执行 Prompt",
       imageAnchorRule: "真实菜品图是视觉锚点；AI 只能做图生图补光、构图、桌面、餐具、背景和氛围延展。",
       textRule: "正文必须先确定本篇主轴：单个菜品、营销活动或当地特色。菜品图讲菜名、口味、分量、食材或吃法；活动图讲活动权益、时间和限制；当地特色图讲地域食材/做法/来这里吃的理由；环境图讲座位、包间、门头、停车和交通。未确认的价格、人均、距离、营业时间、停车、活动和食材来源必须标记待确认。",
@@ -426,7 +426,6 @@ export function buildImagePrompt(input: {
   account: Account;
   noteTask: NoteTask;
   styleBrief?: string[];
-  openclawAssetsDir?: string;
   openclawImagePaths?: string;
   imageSourceMode?: string;
   noteContent?: string;
@@ -434,12 +433,12 @@ export function buildImagePrompt(input: {
   imageCount?: string;
   expertRules?: string;
 }) {
-  const { account, noteTask, styleBrief, openclawAssetsDir, openclawImagePaths, imageSourceMode, noteContent, singleGoal, imageCount, expertRules } = input;
+  const { account, noteTask, styleBrief, openclawImagePaths, imageSourceMode, noteContent, singleGoal, imageCount, expertRules } = input;
   const strategy = strategyForAccount(account);
   const structure = imageStructureForAccount(account);
   const copy = modeCopyForAccount(account);
   const wedding = isWeddingAccount(account);
-  const sourceMode = imageSourceMode === "ai_generate" || imageSourceMode === "manual_images" || imageSourceMode === "folder_select" ? imageSourceMode : "folder_select";
+  const sourceMode = imageSourceMode === "ai_generate" || imageSourceMode === "remote_images" ? imageSourceMode : "remote_images";
   const compactStyle = styleBrief?.length ? styleBrief : [...strategy.highEngagementRules.slice(0, 3), ...copy.defaultStyleBrief];
   const styleExtras = compactStyle
     .filter((item) => !/统一视觉|默认输出|默认\s*5|封面必须以真实/.test(item))
@@ -454,21 +453,12 @@ export function buildImagePrompt(input: {
       "对外发布的图片、标题、正文、图上文字和图注里，不要标注任何来源说明；来源和风险只写入内部审核备注。",
       "输出每张图的生成提示词、图上短字、正文对应句、负向提示和内部合规备注。"
     ],
-    manual_images: [
-      "图片来源模式：用户已经手动指定图片。",
-      `图片目录：${openclawAssetsDir || "未填写"}`,
-      `指定图片：${openclawImagePaths || "未填写"}`,
-      `本篇额外要求：${singleGoal || "优先使用用户指定图片，判断封面、图集顺序和图上文字。"}`,
+    remote_images: [
+      "图片来源模式：用户已经手动指定多张上传到后端的图片链接。",
+      `指定图片链接：${openclawImagePaths || "未填写"}`,
+      `本篇额外要求：${singleGoal || "优先使用用户指定的远程图片，判断封面、图集顺序和图上文字。"}`,
       copy.sourceHint,
-      "不要扫描未指定图片来替换用户选择；如指定图片不足，只列补图建议。"
-    ],
-    folder_select: [
-      "图片来源模式：龙虾从文件夹自动选图。",
-      `图片目录：${openclawAssetsDir || "未填写"}`,
-      `希望图片数量：${imageCount || "按图集结构决定"}`,
-      `本篇额外要求：${singleGoal || "根据这篇笔记内容，从文件夹里自动挑选最匹配的图片。"}`,
-      copy.sourceHint,
-      "请先读取文件夹图片并建立候选清单，再按笔记主题挑选封面图、细节图、关系图和信息卡素材。"
+      "不要读取未指定图片来替换用户选择；如指定图片不足，只列补图建议。"
     ]
   };
   const sourceLines = modeLines[sourceMode];

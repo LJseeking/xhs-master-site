@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 
 function extractJsonArray(input: string) {
   const trimmed = input.trim();
@@ -20,9 +19,8 @@ function extractJsonArray(input: string) {
 }
 
 export async function POST(request: Request, context: { params: { id: string } }) {
-  const accountId = Number(context.params.id);
   const body = await request.json();
-  const account = await prisma.account.findUnique({ where: { id: accountId } });
+  const account = body.account && typeof body.account === "object" ? body.account : null;
   if (!account) return NextResponse.json({ error: "账号不存在" }, { status: 404 });
 
   const items = extractJsonArray(String(body.rulesJson || ""));
@@ -32,23 +30,23 @@ export async function POST(request: Request, context: { params: { id: string } }
   for (const item of items) {
     if (!item || typeof item !== "object" || !String(item.rule || "").trim()) continue;
     created.push(
-      await prisma.expertRule.create({
-        data: {
-          accountId,
-          accountType: String(item.accountType || account.accountType || ""),
-          module: String(item.module || "general"),
-          rule: String(item.rule || ""),
-          positiveExample: String(item.positiveExample || ""),
-          negativeExample: String(item.negativeExample || ""),
-          reason: String(item.reason || ""),
-          source: String(item.source || body.source || "manual"),
-          confidence: Number.isFinite(Number(item.confidence)) ? Number(item.confidence) : 0.5,
-          applicableWhen: String(item.applicableWhen || ""),
-          notApplicableWhen: String(item.notApplicableWhen || ""),
-          nextTest: String(item.nextTest || ""),
-          status: "候选"
-        }
-      })
+      {
+        id: Date.now() + created.length,
+        accountId: account.id,
+        accountType: String(item.accountType || account.accountType || ""),
+        module: String(item.module || "general"),
+        rule: String(item.rule || ""),
+        positiveExample: String(item.positiveExample || ""),
+        negativeExample: String(item.negativeExample || ""),
+        reason: String(item.reason || ""),
+        source: String(item.source || body.source || "manual"),
+        confidence: Number.isFinite(Number(item.confidence)) ? Number(item.confidence) : 0.5,
+        applicableWhen: String(item.applicableWhen || ""),
+        notApplicableWhen: String(item.notApplicableWhen || ""),
+        nextTest: String(item.nextTest || ""),
+        status: "候选",
+        createdAt: new Date().toISOString()
+      }
     );
   }
 
