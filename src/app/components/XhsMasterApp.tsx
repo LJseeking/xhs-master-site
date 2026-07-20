@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import {
   Activity,
   BookOpen,
@@ -12,6 +13,7 @@ import {
   ImageIcon,
   LayoutDashboard,
   Library,
+  LoaderCircle,
   LogOut,
   MessageCircle,
   NotebookPen,
@@ -22,9 +24,12 @@ import {
   ShieldCheck,
   Sparkles,
   ExternalLink,
+  Expand,
+  ImageOff,
   Trash2,
   Upload,
   Wand2,
+  X,
 } from "lucide-react";
 import {
   createBackendAccount,
@@ -47,7 +52,7 @@ import {
 import { generateStrategyWithBrowserLlm, generateWeeklyTasksWithBrowserLlm } from "@/lib/browserStrategyLlm";
 import { loadBrowserWorkspace, saveBrowserWorkspace } from "@/lib/browserWorkspace";
 import { accountTypeTemplates } from "@/data/accountTypeTemplates";
-import { buildNoteTasks } from "@/lib/weeklyPlan";
+import { buildNoteTasks, clampWeeklyFrequency, normalizeWeeklyRatio } from "@/lib/weeklyPlan";
 import type React from "react";
 import clsx from "clsx";
 
@@ -185,6 +190,7 @@ type WeeklyPlan = {
   theme: string;
   goal: string;
   frequency: number;
+  ratio: string;
   testHypothesis: string;
   commercializationMove: string;
   interactionGoal: string;
@@ -372,7 +378,45 @@ function RemoteAssetPicker(props: {
   pickerLabel: string;
   pickerHelp: string;
 }) {
-  const remoteAssets = props.assets.filter((asset) => Boolean(asset.fileUrl));
+  const [hoverPreview, setHoverPreview] = useState<{ asset: Asset; left: number; top: number } | null>(null);
+  const [pinnedPreview, setPinnedPreview] = useState<Asset | null>(null);
+  const [failedUrls, setFailedUrls] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    if (!pinnedPreview) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPinnedPreview(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [pinnedPreview]);
+  const remoteAssets = props.assets.filter((asset) => {
+    if (!asset.fileUrl) return false;
+    const type = (asset.fileType || "").toLowerCase();
+    return type === "image" || type.startsWith("image/") || /\.(?:avif|gif|jpe?g|png|webp)(?:$|\?)/i.test(asset.fileUrl);
+  });
+
+  function showHoverPreview(event: React.MouseEvent, asset: Asset) {
+    const previewSize = 320;
+    const gap = 16;
+    setHoverPreview({
+      asset,
+      left: Math.max(gap, Math.min(event.clientX + gap, window.innerWidth - previewSize - gap)),
+      top: Math.max(gap, Math.min(event.clientY + gap, window.innerHeight - previewSize - gap))
+    });
+  }
+
+  function markImageFailed(url: string) {
+    setFailedUrls((current) => {
+      const next = new Set(current);
+      next.add(url);
+      return next;
+    });
+  }
+
+  function assetLabel(asset: Asset) {
+    return asset.tags?.trim() || asset.filePath || "素材库图片";
+  }
+
   return (
     <div className="space-y-3 rounded border border-ink/10 bg-white p-3">
       <div>
@@ -381,19 +425,111 @@ function RemoteAssetPicker(props: {
       </div>
       {remoteAssets.length ? (
         <div className="grid max-h-56 gap-2 overflow-auto rounded border border-ink/10 bg-ink/5 p-2">
-          {remoteAssets.map((asset) => (
-            <label key={`${asset.id}-${asset.fileUrl}`} className="flex items-start gap-2 rounded bg-white px-3 py-2 text-sm">
-              <input name="selectedAssetUrls" type="checkbox" value={asset.fileUrl || ""} className="mt-1" />
-              <span className="min-w-0">
-                <span className="block truncate font-medium">{asset.filePath}</span>
-                <span className="block truncate text-xs text-teal">{asset.fileUrl}</span>
-              </span>
-            </label>
-          ))}
+          {remoteAssets.map((asset) => {
+            const url = asset.fileUrl || "";
+            const failed = failedUrls.has(url);
+            const checkboxId = `asset-picker-${asset.id}-${url.slice(-12).replace(/[^a-z0-9]/gi, "")}`;
+            return (
+              <div key={`${asset.id}-${url}`} className="flex items-center gap-2 rounded border border-transparent bg-white p-2 transition has-[:checked]:border-teal/40 has-[:checked]:bg-teal/5">
+                <input id={checkboxId} name="selectedAssetUrls" type="checkbox" value={url} className="shrink-0" />
+                <label htmlFor={checkboxId} className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+                  <span
+                    className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded border border-ink/10 bg-ink/5"
+                    onMouseEnter={(event) => showHoverPreview(event, asset)}
+                    onMouseLeave={() => setHoverPreview(null)}
+                  >
+                    {failed ? (
+                      <ImageOff size={20} className="text-ink/35" aria-label="图片无法预览" />
+                    ) : (
+                      // Dynamic object-storage URLs are intentionally rendered without Next Image optimization.
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={url}
+                        alt={assetLabel(asset)}
+                        loading="lazy"
+                        decoding="async"
+                        className="h-full w-full object-cover"
+                        onError={() => markImageFailed(url)}
+                      />
+                    )}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">{asset.filePath}</span>
+                    {asset.tags?.trim() && <span className="mt-0.5 block truncate text-xs text-ink/55">{asset.tags}</span>}
+                    <span className="mt-0.5 block truncate text-xs text-teal">{url}</span>
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  title="查看大图"
+                  aria-label={`查看大图：${assetLabel(asset)}`}
+                  onClick={() => setPinnedPreview(asset)}
+                  disabled={failed}
+                  className="icon-button shrink-0"
+                >
+                  <Expand size={16} />
+                </button>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="rounded border border-dashed border-ink/15 bg-ink/5 px-3 py-4 text-sm text-ink/55">
           当前账号还没有可选素材，请先上传图片。
+        </div>
+      )}
+
+      {hoverPreview && !failedUrls.has(hoverPreview.asset.fileUrl || "") && (
+        <div
+          className="pointer-events-none fixed z-50 flex h-80 w-80 items-center justify-center overflow-hidden rounded-md border border-ink/15 bg-white p-2 shadow-panel"
+          style={{ left: hoverPreview.left, top: hoverPreview.top }}
+          role="tooltip"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={hoverPreview.asset.fileUrl || ""}
+            alt={assetLabel(hoverPreview.asset)}
+            className="max-h-full max-w-full object-contain"
+            onError={() => markImageFailed(hoverPreview.asset.fileUrl || "")}
+          />
+        </div>
+      )}
+
+      {pinnedPreview && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-ink/55 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`素材预览：${assetLabel(pinnedPreview)}`}
+          onClick={() => setPinnedPreview(null)}
+        >
+          <div className="w-full max-w-3xl rounded-md bg-white p-4 shadow-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold">{pinnedPreview.filePath}</div>
+                {pinnedPreview.tags?.trim() && <div className="mt-1 truncate text-xs text-ink/55">{pinnedPreview.tags}</div>}
+              </div>
+              <button type="button" title="关闭预览" aria-label="关闭预览" onClick={() => setPinnedPreview(null)} className="icon-button shrink-0">
+                <X size={17} />
+              </button>
+            </div>
+            <div className="flex max-h-[72vh] min-h-64 items-center justify-center overflow-hidden rounded border border-ink/10 bg-ink/5">
+              {failedUrls.has(pinnedPreview.fileUrl || "") ? (
+                <div className="flex flex-col items-center gap-2 text-sm text-ink/45">
+                  <ImageOff size={28} />
+                  图片无法预览
+                </div>
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={pinnedPreview.fileUrl || ""}
+                  alt={assetLabel(pinnedPreview)}
+                  className="max-h-[72vh] max-w-full object-contain"
+                  onError={() => markImageFailed(pinnedPreview.fileUrl || "")}
+                />
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -639,15 +775,9 @@ function uniqueJoin(values: string[], separator = "；") {
 }
 
 function combineRatio(values: string[]) {
-  return uniqueJoin(
-    values.flatMap((value) =>
-      value
-        .split("/")
-        .map((item) => item.trim())
-        .filter(Boolean)
-    ),
-    " / "
-  );
+  return values
+    .flatMap((value) => value.split("/").map((item) => item.trim()).filter(Boolean))
+    .join(" / ");
 }
 
 function combineWeeklyPresets(presets: WeeklyPreset[]): WeeklyPreset {
@@ -995,6 +1125,7 @@ function mapBackendAccountToUiAccount(account: BackendAccountDetail): Account {
     theme: plan.theme,
     goal: plan.goal,
     frequency: plan.frequency,
+    ratio: plan.ratio || "",
     testHypothesis: plan.testHypothesis,
     commercializationMove: plan.commercializationMove,
     interactionGoal: plan.interactionGoal,
@@ -1127,6 +1258,7 @@ function toBackendWeeklyPlan(plan: WeeklyPlan): BackendWeeklyPlan {
     theme: plan.theme,
     goal: plan.goal,
     frequency: plan.frequency,
+    ratio: plan.ratio,
     testHypothesis: plan.testHypothesis,
     commercializationMove: plan.commercializationMove,
     interactionGoal: plan.interactionGoal,
@@ -1179,6 +1311,7 @@ export function XhsMasterApp() {
   const [accountForm, setAccountForm] = useState(emptyAccountForm([]));
   const [profileContent, setProfileContent] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [toast, setToast] = useState("");
   const [currentUser, setCurrentUser] = useState<LoginResponse | null>(null);
   const [promptResults, setPromptResults] = useState<Record<number, PromptResult>>({});
@@ -1423,6 +1556,7 @@ export function XhsMasterApp() {
     }
     try {
       setLoading(true);
+      setLoadingAction("uploadAsset");
       const sourceType = String(formData.get("sourceType") || "真实素材");
       const tags = String(formData.get("tags") || "");
       const suitableTypes = String(formData.get("suitableTypes") || "");
@@ -1511,6 +1645,7 @@ export function XhsMasterApp() {
       showToast(error instanceof Error ? error.message : "上传素材失败。");
     } finally {
       setLoading(false);
+      setLoadingAction(null);
     }
   }
 
@@ -1531,6 +1666,10 @@ export function XhsMasterApp() {
     if (!selected) return;
     const form = new FormData(event.currentTarget);
     const payload = Object.fromEntries(form.entries()) as Record<string, FormDataEntryValue>;
+    const frequency = clampWeeklyFrequency(payload.frequency);
+    const ratio = normalizeWeeklyRatio(String(payload.ratio || ""), frequency);
+    payload.frequency = String(frequency);
+    payload.ratio = ratio;
     const weeklyFocus = String(payload.weeklyFocus || "").trim();
     if (weeklyFocus) {
       payload.theme = `${String(payload.theme || "本周主题")}｜本周重点：${weeklyFocus}`;
@@ -1541,6 +1680,7 @@ export function XhsMasterApp() {
       payload.interactionGoal = `引导用户围绕「${weeklyFocus}」留言人数、预算、时间、偏好、忌口或交通问题。`;
     }
     setLoading(true);
+    setLoadingAction("generateWeeklyPlan");
     showToast("正在生成一周计划...");
     try {
       const plan = {
@@ -1549,7 +1689,8 @@ export function XhsMasterApp() {
         weekStart: String(payload.weekStart || new Date().toISOString().slice(0, 10)),
         theme: String(payload.theme || "本周主题"),
         goal: String(payload.goal || "验证内容方向并积累可复用素材"),
-        frequency: Number(payload.frequency || 5),
+        frequency,
+        ratio,
         testHypothesis: String(payload.testHypothesis || ""),
         commercializationMove: String(payload.commercializationMove || ""),
         interactionGoal: String(payload.interactionGoal || ""),
@@ -1561,7 +1702,7 @@ export function XhsMasterApp() {
         theme: plan.theme,
         goal: plan.goal,
         frequency: plan.frequency,
-        ratio: String(payload.ratio || ""),
+        ratio: plan.ratio,
         testHypothesis: plan.testHypothesis,
         commercializationMove: plan.commercializationMove,
         interactionGoal: plan.interactionGoal,
@@ -1604,6 +1745,7 @@ export function XhsMasterApp() {
       showToast(error instanceof Error ? error.message : "生成计划失败。");
     } finally {
       setLoading(false);
+      setLoadingAction(null);
     }
   }
 
@@ -1633,44 +1775,47 @@ export function XhsMasterApp() {
     const form = new FormData(event.currentTarget);
     const payload = Object.fromEntries(form.entries());
     setLoading(true);
-    const res = await fetch(`/api/accounts/${selected.id}/reference-research`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        action: "save-results",
-        account: selected,
-        researchId: referenceDraft.research?.id || selected.referenceResearches?.[0]?.id,
-        ...payload
-      })
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      showToast(data.error || "保存参考账号研究失败。");
-      setLoading(false);
-      return;
-    }
-    setReferenceDraft((current) => ({ ...current, research: data.research, summary: data.summary }));
-    if (data.account) {
-      updateSelectedAccount((account) => ({
-        ...account,
-        referenceAccounts: data.account.referenceAccounts,
-        strategy: data.account.strategy || account.strategy,
-        profile: data.account.profile || account.profile,
-        referenceResearches: [
-          data.research,
-          ...(account.referenceResearches || []).filter((item) => item.id !== data.research.id)
-        ]
-      }));
-      await updateBackendAccount({
-        id: selected.id,
-        referenceAccounts: data.account.referenceAccounts,
-        strategyMarkdown: data.account.strategy?.markdown || "",
-        profileContent: data.account.profile?.content || ""
+    setLoadingAction("saveReferenceResearch");
+    try {
+      const res = await fetch(`/api/accounts/${selected.id}/reference-research`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "save-results",
+          account: selected,
+          researchId: referenceDraft.research?.id || selected.referenceResearches?.[0]?.id,
+          ...payload
+        })
       });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "保存参考账号研究失败。");
+      setReferenceDraft((current) => ({ ...current, research: data.research, summary: data.summary }));
+      if (data.account) {
+        updateSelectedAccount((account) => ({
+          ...account,
+          referenceAccounts: data.account.referenceAccounts,
+          strategy: data.account.strategy || account.strategy,
+          profile: data.account.profile || account.profile,
+          referenceResearches: [
+            data.research,
+            ...(account.referenceResearches || []).filter((item) => item.id !== data.research.id)
+          ]
+        }));
+        await updateBackendAccount({
+          id: selected.id,
+          referenceAccounts: data.account.referenceAccounts,
+          strategyMarkdown: data.account.strategy?.markdown || "",
+          profileContent: data.account.profile?.content || ""
+        });
+      }
+      setProfileContent(data.account?.profile?.content || profileContent);
+      showToast("已基于爆款研究增强策划案和配置文件。");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "保存参考账号研究失败。");
+    } finally {
+      setLoading(false);
+      setLoadingAction(null);
     }
-    setProfileContent(data.account?.profile?.content || profileContent);
-    setLoading(false);
-    showToast("已基于爆款研究增强策划案和配置文件。");
   }
 
   async function prepareImageStyleStudy() {
@@ -1728,6 +1873,7 @@ export function XhsMasterApp() {
   async function prepareInteractionPlan(noteTaskId?: number | null, options?: { publishedNoteUrl?: string; interactionGoal?: string }) {
     if (!selected) return;
     setLoading(true);
+    setLoadingAction("prepareInteractionPlan");
     try {
       const res = await fetch(`/api/accounts/${selected.id}/interaction-plan`, {
         method: "POST",
@@ -1758,6 +1904,7 @@ export function XhsMasterApp() {
       showToast(error instanceof Error ? error.message : "生成目标用户互动研究包失败。");
     } finally {
       setLoading(false);
+      setLoadingAction(null);
     }
   }
 
@@ -1797,7 +1944,12 @@ export function XhsMasterApp() {
 
   async function generatePrompt(task: NoteTask) {
     if (!selected || !latestPlan) return;
+    if (!task.imagePlan?.trim()) {
+      showToast("请先为当前笔记生成单篇图片方案，再生成图文草稿箱指令。");
+      return;
+    }
     setLoading(true);
+    setLoadingAction("generatePrompt");
     try {
       const res = await fetch(`/api/note-tasks/${task.id}/prompt`, {
         method: "POST",
@@ -1823,12 +1975,14 @@ export function XhsMasterApp() {
       showToast(error instanceof Error ? error.message : "生成图文草稿箱任务失败。");
     } finally {
       setLoading(false);
+      setLoadingAction(null);
     }
   }
 
   async function generateImagePrompt(task: NoteTask, options?: SingleImagePromptOptions) {
     if (!selected || !latestPlan) return;
     setLoading(true);
+    setLoadingAction("generateImagePrompt");
     try {
       const res = await fetch(`/api/note-tasks/${task.id}/image-prompt`, {
         method: "POST",
@@ -1870,12 +2024,14 @@ export function XhsMasterApp() {
       showToast(error instanceof Error ? error.message : "生成图片方案失败。");
     } finally {
       setLoading(false);
+      setLoadingAction(null);
     }
   }
 
   async function generateBatchImagePosts(options?: { weeks?: string; openclawImagePaths?: string; planningGoal?: string }) {
     if (!selected) return;
     setLoading(true);
+    setLoadingAction("generateBatchImagePosts");
     try {
       const res = await fetch(`/api/accounts/${selected.id}/batch-image-posts`, {
         method: "POST",
@@ -1893,6 +2049,7 @@ export function XhsMasterApp() {
       showToast(error instanceof Error ? error.message : "生成批量图片帖子失败。");
     } finally {
       setLoading(false);
+      setLoadingAction(null);
     }
   }
 
@@ -1902,6 +2059,7 @@ export function XhsMasterApp() {
     const form = new FormData(event.currentTarget);
     const payload = Object.fromEntries(form.entries()) as Record<string, string>;
     setLoading(true);
+    setLoadingAction("saveDraft");
     try {
       const nextTask: NoteTask = {
         ...selectedNote,
@@ -1933,6 +2091,7 @@ export function XhsMasterApp() {
       showToast(error instanceof Error ? error.message : "保存草稿失败。");
     } finally {
       setLoading(false);
+      setLoadingAction(null);
     }
   }
 
@@ -1941,6 +2100,7 @@ export function XhsMasterApp() {
     if (!selected) return;
     const form = new FormData(event.currentTarget);
     setLoading(true);
+    setLoadingAction("generatePostReview");
     try {
       const res = await fetch(`/api/accounts/${selected.id}/post-reviews`, {
         method: "POST",
@@ -1974,6 +2134,7 @@ export function XhsMasterApp() {
       showToast(error instanceof Error ? error.message : "生成单帖复盘失败。");
     } finally {
       setLoading(false);
+      setLoadingAction(null);
     }
   }
 
@@ -1982,6 +2143,7 @@ export function XhsMasterApp() {
     if (!selected) return;
     const form = new FormData(event.currentTarget);
     setLoading(true);
+    setLoadingAction("prepareIndustryLearning");
     try {
       const res = await fetch(`/api/accounts/${selected.id}/industry-learning`, {
         method: "POST",
@@ -2008,6 +2170,7 @@ export function XhsMasterApp() {
       showToast(error instanceof Error ? error.message : "生成行业学习任务失败。");
     } finally {
       setLoading(false);
+      setLoadingAction(null);
     }
   }
 
@@ -2053,6 +2216,7 @@ export function XhsMasterApp() {
     if (!selected) return;
     const form = new FormData(event.currentTarget);
     setLoading(true);
+    setLoadingAction("saveExpertRules");
     try {
       const res = await fetch(`/api/accounts/${selected.id}/expert-rules`, {
         method: "POST",
@@ -2074,6 +2238,7 @@ export function XhsMasterApp() {
       showToast(error instanceof Error ? error.message : "保存规则失败。");
     } finally {
       setLoading(false);
+      setLoadingAction(null);
     }
   }
 
@@ -2087,16 +2252,58 @@ export function XhsMasterApp() {
     window.setTimeout(() => setToast(""), 2500);
   }
 
-  function copy(text: string) {
-    navigator.clipboard.writeText(text);
-    showToast("已复制到剪贴板。");
+  function copyWithTextarea(text: string) {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    const copied = document.execCommand("copy");
+    textarea.remove();
+    if (!copied) throw new Error("浏览器未允许复制操作。");
+  }
+
+  async function copy(text: string) {
+    if (!text) {
+      showToast("当前没有可复制的内容。");
+      return;
+    }
+
+    try {
+      if (window.isSecureContext && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        copyWithTextarea(text);
+      }
+      showToast("已复制到剪贴板。");
+    } catch {
+      try {
+        copyWithTextarea(text);
+        showToast("已复制到剪贴板。");
+      } catch {
+        showToast("复制失败，请检查浏览器剪贴板权限。");
+      }
+    }
   }
 
   return (
     <div className="min-h-screen bg-paper text-ink">
       <aside className="fixed left-0 top-0 hidden h-screen w-64 border-r border-ink/10 bg-white/80 px-4 py-5 shadow-panel backdrop-blur lg:block">
         <div className="mb-6">
-          <div className="text-xl font-semibold">xhs-master-site</div>
+          <div className="flex items-center gap-2.5">
+            <Image
+              src="/xhs-master-logo.png"
+              alt="小红书运营策划大师 Logo"
+              width={200}
+              height={200}
+              priority
+              className="h-10 w-10 shrink-0 rounded-md object-cover"
+            />
+            <div className="min-w-0 text-base font-semibold leading-5">小红书运营策划大师</div>
+          </div>
           <div className="mt-2 inline-flex items-center gap-2 rounded bg-teal/10 px-2 py-1 text-xs font-medium text-teal">
             <ShieldCheck size={14} /> 只生成方案，不自动发布
           </div>
@@ -2149,7 +2356,7 @@ export function XhsMasterApp() {
         <header className="sticky top-0 z-20 border-b border-ink/10 bg-paper/90 px-4 py-4 backdrop-blur lg:px-8">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="text-sm text-ink/60">多账号类型小红书安全运营台</div>
+              <div className="text-sm text-ink/60">小红书运营策划大师</div>
               <h1 className="text-2xl font-semibold">{selected?.name || "创建第一个账号"}</h1>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -2214,6 +2421,7 @@ export function XhsMasterApp() {
               saveReferenceResearch={saveReferenceResearch}
               copy={copy}
               loading={loading}
+              loadingAction={loadingAction}
               setActiveTab={setActiveTab}
             />
           )}
@@ -2234,9 +2442,11 @@ export function XhsMasterApp() {
               generateManifest={generateManifest}
               manifest={manifest}
               copy={copy}
+              loading={loading}
+              loadingAction={loadingAction}
             />
           )}
-          {activeTab === "weekly" && <WeeklyPanel selected={selected} generateWeeklyPlan={generateWeeklyPlan} loading={loading} />}
+          {activeTab === "weekly" && <WeeklyPanel selected={selected} generateWeeklyPlan={generateWeeklyPlan} loading={loading} loadingAction={loadingAction} />}
           {activeTab === "images" && (
             <ImagesPanel
               selected={selected}
@@ -2261,6 +2471,7 @@ export function XhsMasterApp() {
               generateBatchImagePosts={generateBatchImagePosts}
               copy={copy}
               loading={loading}
+              loadingAction={loadingAction}
             />
           )}
           {activeTab === "prompts" && (
@@ -2271,6 +2482,8 @@ export function XhsMasterApp() {
               promptResults={promptResults}
               generatePrompt={generatePrompt}
               copy={copy}
+              loading={loading}
+              loadingAction={loadingAction}
             />
           )}
           {activeTab === "interactions" && (
@@ -2284,9 +2497,10 @@ export function XhsMasterApp() {
               saveInteractionResults={saveInteractionResults}
               copy={copy}
               loading={loading}
+              loadingAction={loadingAction}
             />
           )}
-          {activeTab === "drafts" && <DraftPanel note={selectedNote} saveDraft={saveDraft} />}
+          {activeTab === "drafts" && <DraftPanel note={selectedNote} saveDraft={saveDraft} loading={loading} loadingAction={loadingAction} />}
           {activeTab === "reports" && (
             <ReportsPanel
               selected={selected}
@@ -2297,6 +2511,8 @@ export function XhsMasterApp() {
               saveExpertRules={saveExpertRules}
               postReviewPrompt={postReviewPrompt}
               copy={copy}
+              loading={loading}
+              loadingAction={loadingAction}
             />
           )}
           {activeTab === "learning" && (
@@ -2308,6 +2524,7 @@ export function XhsMasterApp() {
               saveExpertRules={saveExpertRules}
               copy={copy}
               loading={loading}
+              loadingAction={loadingAction}
             />
           )}
           {activeTab === "health" && <HealthPanel health={health} loadHealth={loadHealth} />}
@@ -2553,9 +2770,10 @@ function ReferenceResearchPanel(props: {
   saveReferenceResearch: (event: React.FormEvent<HTMLFormElement>) => void;
   copy: (text: string) => void;
   loading: boolean;
+  loadingAction: string | null;
   setActiveTab: (tab: any) => void;
 }) {
-  const { selected, draft, prepareReferenceResearch, saveReferenceResearch, copy, loading, setActiveTab } = props;
+  const { selected, draft, prepareReferenceResearch, saveReferenceResearch, copy, loading, loadingAction, setActiveTab } = props;
   if (!selected) return <EmptyState />;
 
   const latest = draft.research || selected.referenceResearches?.[0];
@@ -2662,8 +2880,13 @@ function ReferenceResearchPanel(props: {
             </label>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button type="submit" disabled={loading} className="primary-button">
-              <Sparkles size={17} /> 保存研究并增强策划
+            <button type="submit" disabled={loading} aria-busy={loadingAction === "saveReferenceResearch"} className="primary-button">
+              <ActionButtonContent
+                loading={loadingAction === "saveReferenceResearch"}
+                icon={<Sparkles size={17} />}
+                idleText="保存研究并增强策划"
+                loadingText="正在保存并增强策划..."
+              />
             </button>
             <span className="text-xs text-ink/55">成功后会更新策划案和账号配置文件；不需要也可以跳过。</span>
           </div>
@@ -2748,8 +2971,10 @@ function AssetsPanel(props: {
   generateManifest: () => void;
   manifest: { content: string; validation: string; path: string } | null;
   copy: (text: string) => void;
+  loading: boolean;
+  loadingAction: string | null;
 }) {
-  const { selected, uploadAsset, generateManifest, manifest, copy } = props;
+  const { selected, uploadAsset, generateManifest, manifest, copy, loading, loadingAction } = props;
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   if (!selected) return <EmptyState />;
   const copyText = assetUiCopy(selected.accountType);
@@ -2773,7 +2998,7 @@ function AssetsPanel(props: {
             <div className="rounded border border-ink/10 bg-white p-3">
               <div className="text-xs font-medium text-ink/55">已登记素材</div>
               <div className="mt-2 text-2xl font-semibold">{selected.assets.length}</div>
-            <p className="mt-1 text-sm text-ink/60">账号级长期素材，会被批量生成和单篇精修的远程多图选择优先参考。</p>
+            <p className="mt-1 text-sm text-ink/60">账号级长期素材，会被批量生成和单篇精修的素材库多图选择优先参考。</p>
           </div>
           <div className="rounded border border-ink/10 bg-white p-3">
             <div className="text-xs font-medium text-ink/55">授权状态</div>
@@ -2781,7 +3006,7 @@ function AssetsPanel(props: {
             <p className="mt-1 text-sm text-ink/60">未确认肖像、价格、地点、路线、档期或资质时，生成内容必须保留核验提示。</p>
           </div>
           <div className="rounded border border-ink/10 bg-white p-3">
-            <div className="text-xs font-medium text-ink/55">远程可预览素材</div>
+            <div className="text-xs font-medium text-ink/55">可预览素材</div>
             <div className="mt-2 text-sm font-semibold">{selected.assets.filter((asset) => asset.fileUrl).length} 个</div>
             <p className="mt-1 text-sm text-ink/60">上传后的素材会直接复用到批量选图和单篇精修。</p>
           </div>
@@ -2800,8 +3025,13 @@ function AssetsPanel(props: {
             <h2 className="section-title">上传素材</h2>
             <p className="text-sm text-ink/60">上传后会进入当前账号素材库。</p>
           </div>
-          <button type="submit" className="primary-button">
-            <Upload size={17} /> 上传并登记素材
+          <button type="submit" disabled={loading} aria-busy={loadingAction === "uploadAsset"} className="primary-button">
+            <ActionButtonContent
+              loading={loadingAction === "uploadAsset"}
+              icon={<Upload size={17} />}
+              idleText="上传并登记素材"
+              loadingText="正在上传并登记..."
+            />
           </button>
         </div>
         <div className="grid gap-3 md:grid-cols-4">
@@ -2946,17 +3176,21 @@ function AssetsPanel(props: {
 function WeeklyPanel({
   selected,
   generateWeeklyPlan,
-  loading
+  loading,
+  loadingAction
 }: {
   selected?: Account;
   generateWeeklyPlan: (event: React.FormEvent<HTMLFormElement>) => void;
   loading: boolean;
+  loadingAction: string | null;
 }) {
   const accountType = selected?.accountType || "restaurant";
   const presets = useMemo(() => weeklyPresets(accountType), [accountType]);
   const [selectedPresetNames, setSelectedPresetNames] = useState<string[]>([]);
+  const [weeklyFrequency, setWeeklyFrequency] = useState("4");
   useEffect(() => {
     setSelectedPresetNames(presets[0]?.name ? [presets[0].name] : []);
+    setWeeklyFrequency(String(presets[0]?.frequency || 4));
   }, [presets]);
 
   if (!selected) return <EmptyState />;
@@ -2972,6 +3206,8 @@ function WeeklyPanel({
   const weeklyCopy = weeklyUiCopy(selected.accountType);
   const focusCopy = weeklyFocusCopy(selected.accountType);
   const defaultRatio = weeklyCopy.ratio;
+  const effectiveFrequency = clampWeeklyFrequency(weeklyFrequency, combinedPreset.frequency);
+  const normalizedRatio = normalizeWeeklyRatio(combinedPreset.ratio || defaultRatio, effectiveFrequency);
   const togglePreset = (name: string) => {
     setSelectedPresetNames((current) => {
       if (current.includes(name)) {
@@ -3051,10 +3287,19 @@ function WeeklyPanel({
               <div className="mt-2 text-sm leading-6 text-ink/65">{activePresets.map((preset) => preset.name).join(" / ")}</div>
               <div className="mt-1 text-xs leading-5 text-ink/50">{combinedPreset.goal}</div>
             </div>
-            <Input name="frequency" label="本周发几篇" defaultValue={String(combinedPreset.frequency)} />
+            <Input
+              name="frequency"
+              label="本周发几篇"
+              type="number"
+              min={1}
+              max={7}
+              step={1}
+              value={weeklyFrequency}
+              onChange={setWeeklyFrequency}
+            />
             <div className="rounded border border-ink/10 bg-white p-3 text-sm">
               <div className="font-medium">内容分配</div>
-              <div className="mt-2 leading-6 text-ink/65">{combinedPreset.ratio || defaultRatio}</div>
+              <div className="mt-2 leading-6 text-ink/65">{normalizedRatio}</div>
             </div>
           </div>
 
@@ -3062,7 +3307,7 @@ function WeeklyPanel({
             <Textarea name="weeklyFocus" label={focusCopy.label} placeholder={focusCopy.placeholder} help={focusCopy.help} />
             <input type="hidden" name="theme" value={combinedPreset.theme} readOnly />
             <input type="hidden" name="goal" value={combinedPreset.goal} readOnly />
-            <input type="hidden" name="ratio" value={combinedPreset.ratio || defaultRatio} readOnly />
+            <input type="hidden" name="ratio" value={normalizedRatio} readOnly />
             <input type="hidden" name="testHypothesis" value={combinedPreset.testHypothesis} readOnly />
             <input type="hidden" name="commercializationMove" value={combinedPreset.commercializationMove} readOnly />
             <input type="hidden" name="interactionGoal" value={combinedPreset.interactionGoal} readOnly />
@@ -3071,8 +3316,13 @@ function WeeklyPanel({
           </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button type="submit" disabled={loading} className="primary-button">
-              <Sparkles size={17} /> {loading ? "正在调用大模型..." : "生成一周计划"}
+            <button type="submit" disabled={loading} aria-busy={loadingAction === "generateWeeklyPlan"} className="primary-button">
+              <ActionButtonContent
+                loading={loadingAction === "generateWeeklyPlan"}
+                icon={<Sparkles size={17} />}
+                idleText="生成一周计划"
+                loadingText="正在生成一周计划..."
+              />
             </button>
             <span className="text-xs text-ink/55">生成后会自动跳转到“笔记草稿”页。</span>
           </div>
@@ -3168,6 +3418,7 @@ function ImagesPanel(props: {
   generateBatchImagePosts: (options?: { weeks?: string; openclawImagePaths?: string; planningGoal?: string }) => void;
   copy: (text: string) => void;
   loading: boolean;
+  loadingAction: string | null;
 }) {
   const {
     selected,
@@ -3183,7 +3434,8 @@ function ImagesPanel(props: {
     batchImagePostResult,
     generateBatchImagePosts,
     copy,
-    loading
+    loading,
+    loadingAction
   } = props;
   const note = plan?.noteTasks.find((task) => task.id === selectedNoteId) ?? plan?.noteTasks?.[0];
   const result = note ? imagePromptResults[note.id] : null;
@@ -3201,6 +3453,7 @@ function ImagesPanel(props: {
   const [singleImageCount, setSingleImageCount] = useState("5");
   const [batchUploadFiles, setBatchUploadFiles] = useState<File[]>([]);
   const [singleUploadFiles, setSingleUploadFiles] = useState<File[]>([]);
+  const [imageSubmitting, setImageSubmitting] = useState<"batch" | "single" | null>(null);
 
   async function uploadFilesWithAuth(files: File[], options?: { suitableTypes?: string; tags?: string }) {
     const token = getToken();
@@ -3265,9 +3518,9 @@ function ImagesPanel(props: {
     const activeSingleCommand = result?.commands?.[0];
     const singleTaskContent = result?.openclawTask?.content || result?.imagePrompt?.content || "";
     const accountKindLabel = isWedding ? "婚礼已上传图片" : "已上传素材图片";
-    const batchTitle = isWedding ? "用婚礼远程图片自动生成批量帖子" : "用远程图片自动生成批量帖子";
+    const batchTitle = isWedding ? "用婚礼素材库图片自动生成批量帖子" : "用素材库图片自动生成批量帖子";
     const batchDescription = isWedding
-      ? "适合已经有一批婚礼远程图片，但还没有想好每篇发什么。龙虾会先读图，再结合全国同类型爆款，直接产出多篇帖子方案。"
+      ? "适合已经有一批婚礼素材库图片，但还没有想好每篇发什么。龙虾会先读图，再结合全国同类型爆款，直接产出多篇帖子方案。"
       : "适合已经有一批素材图，但还没有想好每篇发什么。龙虾会先读图，再结合全国同类型爆款，直接产出多篇帖子方案。";
     const defaultBatchGoal = isWedding
       ? "例如：优先从婚礼蛋糕、花艺、仪式区、迎宾区、桌花中找高收藏选题。"
@@ -3303,6 +3556,8 @@ function ImagesPanel(props: {
               className="panel border-teal/30"
               onSubmit={(event) => {
                 event.preventDefault();
+                if (imageSubmitting) return;
+                setImageSubmitting("batch");
                 const form = new FormData(event.currentTarget);
                 const run = async () => {
                   let imagePaths = collectRemoteImageUrls(form).join("\n");
@@ -3325,7 +3580,9 @@ function ImagesPanel(props: {
                   });
                   setBatchUploadFiles([]);
                 };
-                run().catch((error) => window.alert(error instanceof Error ? error.message : "生成批量帖子任务失败。"));
+                run()
+                  .catch((error) => window.alert(error instanceof Error ? error.message : "生成批量帖子任务失败。"))
+                  .finally(() => setImageSubmitting(null));
               }}
             >
               <div className="mb-4">
@@ -3383,7 +3640,7 @@ function ImagesPanel(props: {
                 )}
                 <RemoteAssetPicker
                   assets={selected?.assets || []}
-                  pickerLabel="本次要分析的远程图片"
+                  pickerLabel="本次要分析的素材库图片"
                   pickerHelp="从当前账号素材库里多选；没有素材就先上传图片。"
                 />
                 <Textarea
@@ -3396,8 +3653,13 @@ function ImagesPanel(props: {
                 />
               </div>
 
-              <button type="submit" disabled={loading || !selected} className="primary-button mt-4">
-                <Sparkles size={17} /> 生成批量帖子任务
+              <button type="submit" disabled={loading || Boolean(imageSubmitting) || !selected} aria-busy={imageSubmitting === "batch"} className="primary-button mt-4">
+                <ActionButtonContent
+                  loading={imageSubmitting === "batch" || loadingAction === "generateBatchImagePosts"}
+                  icon={<Sparkles size={17} />}
+                  idleText="生成批量帖子任务"
+                  loadingText="正在生成批量帖子任务..."
+                />
               </button>
               {batchImagePostResult?.planningPrompt.path && <div className="mt-3 rounded bg-teal/10 px-3 py-2 text-xs text-teal">{batchImagePostResult?.planningPrompt.path}</div>}
             </form>
@@ -3440,6 +3702,8 @@ function ImagesPanel(props: {
               onSubmit={(event) => {
                 event.preventDefault();
                 if (!note) return;
+                if (imageSubmitting) return;
+                setImageSubmitting("single");
                 const form = new FormData(event.currentTarget);
                 const run = async () => {
                   let imagePaths = collectRemoteImageUrls(form).join("\n");
@@ -3468,7 +3732,9 @@ function ImagesPanel(props: {
                   });
                   setSingleUploadFiles([]);
                 };
-                run().catch((error) => window.alert(error instanceof Error ? error.message : "生成单篇图片方案失败。"));
+                run()
+                  .catch((error) => window.alert(error instanceof Error ? error.message : "生成单篇图片方案失败。"))
+                  .finally(() => setImageSubmitting(null));
               }}
             >
               <div className="mb-4">
@@ -3494,7 +3760,7 @@ function ImagesPanel(props: {
                 <div className="mb-2 text-sm font-medium text-ink/70">图片来源</div>
                 <div className="grid gap-2 md:grid-cols-2">
                   {[
-                    ["remote_images", "多张远程图片", "从素材库多选已经上传到后端的图片。"],
+                    ["remote_images", "多张素材库图片", "从素材库多选已经上传到后端的图片。"],
                     ["ai_generate", "AI 辅助图", "没有真实图时，只生成信息卡、结构图或低拟真辅助画面。"]
                   ].map(([mode, title, desc]) => (
                     <button
@@ -3581,8 +3847,8 @@ function ImagesPanel(props: {
                     )}
                     <RemoteAssetPicker
                       assets={selected?.assets || []}
-                      pickerLabel="这篇要用的远程图片"
-                      pickerHelp="可以一次多选账号素材库里已经上传到后端的远程图。"
+                      pickerLabel="这篇要用的素材库图片"
+                      pickerHelp="可以一次多选账号素材库里已经上传的图片。"
                     />
                   </>
                 )}
@@ -3595,8 +3861,13 @@ function ImagesPanel(props: {
                 />
               </div>
 
-              <button type="submit" disabled={loading || !note} className="primary-button mt-4">
-                <ImageIcon size={17} /> {singleSourceMode === "ai_generate" ? "生成 AI 辅助图方案" : "用远程多图生成单篇方案"}
+              <button type="submit" disabled={loading || Boolean(imageSubmitting) || !note} aria-busy={imageSubmitting === "single"} className="primary-button mt-4">
+                <ActionButtonContent
+                  loading={imageSubmitting === "single" || loadingAction === "generateImagePrompt"}
+                  icon={<ImageIcon size={17} />}
+                  idleText={singleSourceMode === "ai_generate" ? "生成 AI 辅助图方案" : "用素材库多图生成单篇方案"}
+                  loadingText={singleSourceMode === "ai_generate" ? "正在生成 AI 辅助图方案..." : "正在生成单篇方案..."}
+                />
               </button>
             </form>
 
@@ -3711,7 +3982,7 @@ function ImagesPanel(props: {
           >
             <div className="mb-4">
               <div className="mb-2 inline-flex rounded bg-teal/10 px-3 py-1 text-xs font-semibold text-teal">婚礼账号优先流程</div>
-              <h2 className="section-title">用婚礼远程图片自动生成选题规划</h2>
+              <h2 className="section-title">用婚礼素材库图片自动生成选题规划</h2>
               <p className="mt-1 text-sm text-ink/60">
                 先上传婚礼图片，系统会自动读图找细节，再生成一周或两周笔记规划。
               </p>
@@ -3719,7 +3990,7 @@ function ImagesPanel(props: {
 
             <div className="mb-4 grid gap-3 md:grid-cols-3">
               {[ 
-                ["1", "准备婚礼远程图片", "建议 20-40 张，优先能直接访问的大图 URL。"],
+                ["1", "准备婚礼素材库图片", "建议 20-40 张，优先选择清晰大图。"],
                 ["2", "生成龙虾 Prompt", "让龙虾读图并研究小红书爆款。"],
                 ["3", "得到周计划", "输出标题、配图顺序、正文方向和风险核验。"]
               ].map(([step, title, desc]) => (
@@ -3749,7 +4020,7 @@ function ImagesPanel(props: {
             <div className="mt-3 grid gap-3">
               <RemoteAssetPicker
                 assets={selected?.assets || []}
-                pickerLabel="本次要分析的婚礼远程图片"
+                pickerLabel="本次要分析的婚礼素材库图片"
                 pickerHelp="从当前账号婚礼素材里多选；没有素材就先上传图片。"
               />
               <div>
@@ -3843,7 +4114,7 @@ function ImagesPanel(props: {
               <RemoteAssetPicker
                 assets={selected?.assets || []}
                 pickerLabel="这篇要用的已上传素材"
-                pickerHelp="可以从账号素材库多选已经上传到后端的远程图。"
+                pickerHelp="可以从账号素材库多选已经上传的图片。"
               />
             </div>
           </details>
@@ -3957,12 +4228,15 @@ function PromptsPanel(props: {
   promptResults: Record<number, PromptResult>;
   generatePrompt: (task: NoteTask) => void;
   copy: (text: string) => void;
+  loading: boolean;
+  loadingAction: string | null;
 }) {
-  const { plan, selectedNoteId, setSelectedNoteId, promptResults, generatePrompt, copy } = props;
+  const { plan, selectedNoteId, setSelectedNoteId, promptResults, generatePrompt, copy, loading, loadingAction } = props;
   const note = plan?.noteTasks.find((task) => task.id === selectedNoteId) ?? plan?.noteTasks?.[0];
   const result = note ? promptResults[note.id] : null;
   const openclawTaskContent = result?.openclawTask?.content || result?.prompt.content || "";
   if (!plan || !note) return <div className="panel"><EmptyState text="先生成本周内容，再生成笔记草稿。" /></div>;
+  const hasImagePlan = Boolean(note.imagePlan?.trim());
   return (
     <div className="grid gap-5 xl:grid-cols-[0.45fr_0.55fr]">
       <div className="panel">
@@ -3972,13 +4246,25 @@ function PromptsPanel(props: {
             <button key={task.id} type="button" onClick={() => setSelectedNoteId(task.id)} className={clsx("w-full rounded border p-3 text-left text-sm", task.id === note.id ? "border-ink bg-white" : "border-ink/10 bg-white/60")}>
               <div className="font-medium">{task.topicTitle}</div>
               <div className="mt-1 text-xs text-ink/60">{task.publishAt} / {task.status}</div>
+              <div className={clsx("mt-1 text-xs font-medium", task.imagePlan?.trim() ? "text-teal" : "text-coral")}>
+                {task.imagePlan?.trim() ? "图片方案已完成" : "待生成图片方案"}
+              </div>
             </button>
           ))}
         </div>
-        <button type="button" onClick={() => generatePrompt(note)} className="primary-button mt-4">
-          <Wand2 size={17} /> 生成图文草稿箱指令
+        <button type="button" onClick={() => generatePrompt(note)} disabled={loading || !hasImagePlan} aria-busy={loadingAction === "generatePrompt"} className="primary-button mt-4">
+          <ActionButtonContent
+            loading={loadingAction === "generatePrompt"}
+            icon={<Wand2 size={17} />}
+            idleText="生成图文草稿箱指令"
+            loadingText="正在生成草稿箱指令..."
+          />
         </button>
-        <p className="mt-3 text-xs leading-5 text-ink/60">请先在“图片方案”中完成当前单篇任务的配图，再把这里生成的完整任务发给 OpenClaw。</p>
+        <p className={clsx("mt-3 text-xs leading-5", hasImagePlan ? "text-ink/60" : "font-medium text-coral")}>
+          {hasImagePlan
+            ? "图片方案已完成，可以生成图文草稿箱指令。"
+            : "当前笔记尚未生成图片方案，请先前往“图片方案 → 单篇精修模式”完成图片方案。"}
+        </p>
       </div>
       <div className="space-y-5">
         <div className="panel">
@@ -4035,6 +4321,7 @@ function InteractionsPanel(props: {
   saveInteractionResults: (event: React.FormEvent<HTMLFormElement>) => void;
   copy: (text: string) => void;
   loading: boolean;
+  loadingAction: string | null;
 }) {
   const {
     selected,
@@ -4044,7 +4331,8 @@ function InteractionsPanel(props: {
     draft,
     prepareInteractionPlan,
     copy,
-    loading
+    loading,
+    loadingAction
   } = props;
   if (!selected) return <EmptyState />;
 
@@ -4124,8 +4412,13 @@ function InteractionsPanel(props: {
               <Input name="publishedNoteUrl" label="已发布笔记 URL" defaultValue={latest?.searchKeywords || ""} placeholder="粘贴小红书已发布笔记链接" />
               <Textarea name="interactionGoal" label="互动目标" defaultValue={defaultGoal} />
 
-              <button type="submit" disabled={loading} className="primary-button">
-                <MessageCircle size={17} /> 生成互动建议
+              <button type="submit" disabled={loading} aria-busy={loadingAction === "prepareInteractionPlan"} className="primary-button">
+                <ActionButtonContent
+                  loading={loadingAction === "prepareInteractionPlan"}
+                  icon={<MessageCircle size={17} />}
+                  idleText="生成互动建议"
+                  loadingText="正在生成互动建议..."
+                />
               </button>
               <p className="text-xs text-ink/55">真实账号互动只生成命令建议；是否执行由你在终端确认。</p>
             </div>
@@ -4181,7 +4474,17 @@ function InteractionsPanel(props: {
   );
 }
 
-function DraftPanel({ note, saveDraft }: { note?: NoteTask; saveDraft: (event: React.FormEvent<HTMLFormElement>) => void }) {
+function DraftPanel({
+  note,
+  saveDraft,
+  loading,
+  loadingAction
+}: {
+  note?: NoteTask;
+  saveDraft: (event: React.FormEvent<HTMLFormElement>) => void;
+  loading: boolean;
+  loadingAction: string | null;
+}) {
   if (!note) return <div className="panel"><EmptyState text="先选择或生成一篇本周内容。" /></div>;
   const draft = parseDraftContent(note.bodyDraft);
   return (
@@ -4202,8 +4505,13 @@ function DraftPanel({ note, saveDraft }: { note?: NoteTask; saveDraft: (event: R
         <Input name="publishStatus" label="发布状态" defaultValue={draft.publishStatus || "未发布"} />
         <Textarea name="rawResult" label="原始返回内容" defaultValue={draft.rawResult || ""} />
       </div>
-      <button type="submit" className="primary-button mt-4">
-        <Save size={17} /> 保存草稿结果
+      <button type="submit" disabled={loading} aria-busy={loadingAction === "saveDraft"} className="primary-button mt-4">
+        <ActionButtonContent
+          loading={loadingAction === "saveDraft"}
+          icon={<Save size={17} />}
+          idleText="保存草稿结果"
+          loadingText="正在保存草稿结果..."
+        />
       </button>
     </form>
   );
@@ -4218,8 +4526,10 @@ function ReportsPanel(props: {
   saveExpertRules: (event: React.FormEvent<HTMLFormElement>) => void;
   postReviewPrompt: string;
   copy: (text: string) => void;
+  loading: boolean;
+  loadingAction: string | null;
 }) {
-  const { selected, latestPlan, selectedNoteId, setSelectedNoteId, generatePostReview, saveExpertRules, postReviewPrompt, copy } = props;
+  const { selected, latestPlan, selectedNoteId, setSelectedNoteId, generatePostReview, saveExpertRules, postReviewPrompt, copy, loading, loadingAction } = props;
   const note = latestPlan?.noteTasks.find((task) => task.id === selectedNoteId) ?? latestPlan?.noteTasks?.[0];
 
   if (!selected) return <div className="panel"><EmptyState /></div>;
@@ -4302,8 +4612,13 @@ function ReportsPanel(props: {
             />
           </div>
 
-          <button type="submit" className="primary-button mt-4">
-            <Send size={17} /> 生成单帖复盘 Prompt
+          <button type="submit" disabled={loading} aria-busy={loadingAction === "generatePostReview"} className="primary-button mt-4">
+            <ActionButtonContent
+              loading={loadingAction === "generatePostReview"}
+              icon={<Send size={17} />}
+              idleText="生成单帖复盘 Prompt"
+              loadingText="正在生成单帖复盘 Prompt..."
+            />
           </button>
         </form>
 
@@ -4328,8 +4643,13 @@ function ReportsPanel(props: {
               </p>
             </div>
             <Textarea name="rulesJson" label="候选规则 JSON" placeholder={'[{"module":"title","rule":"...","confidence":0.5}]'} />
-            <button type="submit" className="secondary-button mt-4">
-              <Save size={17} /> 保存到规则库
+            <button type="submit" disabled={loading} aria-busy={loadingAction === "saveExpertRules"} className="secondary-button mt-4">
+              <ActionButtonContent
+                loading={loadingAction === "saveExpertRules"}
+                icon={<Save size={17} />}
+                idleText="保存到规则库"
+                loadingText="正在保存到规则库..."
+              />
             </button>
           </form>
         </div>
@@ -4373,8 +4693,9 @@ function IndustryLearningPanel(props: {
   saveExpertRules: (event: React.FormEvent<HTMLFormElement>) => void;
   copy: (text: string) => void;
   loading: boolean;
+  loadingAction: string | null;
 }) {
-  const { selected, draft, prepareIndustryLearning, saveIndustryLearning, saveExpertRules, copy, loading } = props;
+  const { selected, draft, prepareIndustryLearning, saveIndustryLearning, saveExpertRules, copy, loading, loadingAction } = props;
   const commands = draft.commands || safeParseCommands(draft.research?.commandJson || selected?.industryKnowledgeResearches?.[0]?.commandJson || "[]");
   const researchPrompt = draft.researchPrompt || draft.research?.researchPrompt || selected?.industryKnowledgeResearches?.[0]?.researchPrompt || "";
   const commandText = commands.map((item) => item.command).join("\n");
@@ -4426,8 +4747,13 @@ function IndustryLearningPanel(props: {
               />
               <Input name="searchScope" label="搜索范围" defaultValue="全国 / 全网优先，本地只作为补充" />
             </div>
-            <button type="submit" disabled={loading} className="primary-button mt-4">
-              <Search size={17} /> 生成行业学习任务
+            <button type="submit" disabled={loading} aria-busy={loadingAction === "prepareIndustryLearning"} className="primary-button mt-4">
+              <ActionButtonContent
+                loading={loadingAction === "prepareIndustryLearning"}
+                icon={<Search size={17} />}
+                idleText="生成行业学习任务"
+                loadingText="正在生成行业学习任务..."
+              />
             </button>
           </form>
 
@@ -4476,8 +4802,13 @@ function IndustryLearningPanel(props: {
               <p className="mt-1 text-sm text-ink/60">把行业学习输出里的 JSON 规则数组粘贴进来。</p>
             </div>
             <Textarea name="rulesJson" label="候选规则 JSON" placeholder={'[{"module":"cover","rule":"...","source":"expert_article","confidence":0.6}]'} />
-            <button type="submit" className="primary-button mt-4">
-              <Sparkles size={17} /> 保存到规则库
+            <button type="submit" disabled={loading} aria-busy={loadingAction === "saveExpertRules"} className="primary-button mt-4">
+              <ActionButtonContent
+                loading={loadingAction === "saveExpertRules"}
+                icon={<Sparkles size={17} />}
+                idleText="保存到规则库"
+                loadingText="正在保存到规则库..."
+              />
             </button>
           </form>
         </div>
@@ -4526,17 +4857,31 @@ function HealthPanel({ health, loadHealth }: { health: any; loadHealth: () => vo
 
 function Input(props: {
   label: string;
+  type?: React.HTMLInputTypeAttribute;
   value?: string;
   defaultValue?: string;
   placeholder?: string;
   name?: string;
   help?: string;
+  min?: number;
+  max?: number;
+  step?: number;
   onChange?: (value: string) => void;
 }) {
   return (
     <label className="field">
       <span>{props.label}</span>
-      <input name={props.name} value={props.value} defaultValue={props.defaultValue} placeholder={props.placeholder} onChange={(event) => props.onChange?.(event.target.value)} />
+      <input
+        type={props.type}
+        name={props.name}
+        value={props.value}
+        defaultValue={props.defaultValue}
+        placeholder={props.placeholder}
+        min={props.min}
+        max={props.max}
+        step={props.step}
+        onChange={(event) => props.onChange?.(event.target.value)}
+      />
       {props.help && <span className="text-xs leading-5 text-ink/50">{props.help}</span>}
     </label>
   );
@@ -4566,6 +4911,20 @@ function Info({ label, value }: { label: string; value: string }) {
       <div className="text-xs text-ink/55">{label}</div>
       <div className="mt-1 break-words text-sm">{value}</div>
     </div>
+  );
+}
+
+function ActionButtonContent(props: {
+  loading: boolean;
+  icon: React.ReactNode;
+  idleText: string;
+  loadingText: string;
+}) {
+  return (
+    <>
+      {props.loading ? <LoaderCircle size={17} className="animate-spin" aria-hidden="true" /> : props.icon}
+      <span>{props.loading ? props.loadingText : props.idleText}</span>
+    </>
   );
 }
 

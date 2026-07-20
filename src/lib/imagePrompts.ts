@@ -456,7 +456,7 @@ export function buildImagePrompt(input: {
     remote_images: [
       "图片来源模式：用户已经手动指定多张上传到后端的图片链接。",
       `指定图片链接：${openclawImagePaths || "未填写"}`,
-      `本篇额外要求：${singleGoal || "优先使用用户指定的远程图片，判断封面、图集顺序和图上文字。"}`,
+      `本篇额外要求：${singleGoal || "优先使用用户指定的素材库图片，判断封面、图集顺序和图上文字。"}`,
       copy.sourceHint,
       "不要读取未指定图片来替换用户选择；如指定图片不足，只列补图建议。"
     ]

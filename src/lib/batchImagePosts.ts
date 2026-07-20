@@ -56,7 +56,7 @@ function compact(value: string | null | undefined, fallback = "未填写") {
 }
 
 function assetLines(assets: Asset[] | undefined) {
-  if (!assets?.length) return "- 后台还没有登记远程素材；请优先读取用户提供的远程图片 URL。";
+  if (!assets?.length) return "- 素材库还没有登记图片；请先让用户上传或选择素材库图片。";
   return assets
     .slice(0, 80)
     .map((asset, index) => {
@@ -109,17 +109,17 @@ function searchKeywords(account: BatchPostAccount) {
 export function buildBatchImagePostsPrompt(account: BatchPostAccount, options: BatchPostOptions) {
   const weeks = options.weeks === 2 ? 2 : 1;
   const targetCount = weeks === 2 ? "10-14 篇" : "5-7 篇";
-  const specifiedImages = compact(options.openclawImagePaths, "未指定；请先在前端选择或填写远程图片 URL。");
+  const specifiedImages = compact(options.openclawImagePaths, "未指定；请先在前端选择素材库图片。");
   const planningGoal = compact(options.planningGoal, "优先从真实图片里找高收藏选题，直接形成可执行的小红书批量帖子方案。");
   const keywords = searchKeywords(account);
 
   return `# 给龙虾 skill 的批量帖子生成 Prompt
 
 ## 当前执行模式
-只读研究 + 远程图片分析 + 生成批量帖子方案。不得发布、评论、点赞、收藏、关注或私信。
+只读研究 + 素材库图片分析 + 生成批量帖子方案。不得发布、评论、点赞、收藏、关注或私信。
 
 ## 任务目标
-客户会提供一批真实素材的远程图片 URL。请你先读取图片，识别其中最适合小红书表达的主体、细节、场景和可核验信息；再只读研究小红书全国范围内同类型热门内容；最后把“真实图片特点”和“全国同行爆款表达方式”合并，直接输出 ${weeks} 周小红书批量帖子方案（${targetCount}）。
+客户会从素材库提供一批真实图片。请你先读取图片，识别其中最适合小红书表达的主体、细节、场景和可核验信息；再只读研究小红书全国范围内同类型热门内容；最后把“真实图片特点”和“全国同行爆款表达方式”合并，直接输出 ${weeks} 周小红书批量帖子方案（${targetCount}）。
 
 重要原则：同行爆款内容分析不能局限在账号当地。必须优先搜索全国同类型热门内容，充分学习成熟账号的标题节奏、封面文字、图集顺序、信息卡表达、评论痛点和转化方式；本地城市内容只作为落地差异、价格语境、用户咨询习惯的补充对照，不能限制整体风格。
 
@@ -139,8 +139,8 @@ export function buildBatchImagePostsPrompt(account: BatchPostAccount, options: B
 ## 本次额外目标
 ${planningGoal}
 
-## 远程图片输入
-- 指定远程图片 URL：
+## 素材库图片输入
+- 指定素材库图片 URL：
 ${specifiedImages}
 
 ## 后台已登记素材
@@ -153,7 +153,7 @@ ${latestReferenceBrief(account)}
 ${latestStyleBrief(account)}
 
 ## 第一步：批量读图，建立图片清单
-请读取这些远程图片 URL，输出一张 Markdown 表格。每张图至少判断：
+请读取这些素材库图片 URL，输出一张 Markdown 表格。每张图至少判断：
 1. 文件名/URL。
 2. 画面主体：${imageFocus(account)}。
 3. 可写亮点：用户为什么会点开、收藏、评论或咨询。
@@ -209,7 +209,7 @@ export function buildBatchImagePostsCommands(account: BatchPostAccount, options:
     {
       category: "批量分析图片并生成帖子",
       command: `${base} xhs-content-ops draft-note --prompt-file ${q(options.promptFile)} ${accountFlag} --safe-mode`,
-      description: `读取远程图片 URL，先识别可写图片，再结合全国同类型爆款研究，输出 ${options.weeks === 2 ? "两周" : "一周"}批量帖子方案。`,
+      description: `读取素材库图片，先识别可写图片，再结合全国同类型爆款研究，输出 ${options.weeks === 2 ? "两周" : "一周"}批量帖子方案。`,
       safetyNote: "只生成方案和草稿建议；价格、日期、地点、路线、档期、库存、资质、授权和隐私必须人工核验。"
     }
   ];
