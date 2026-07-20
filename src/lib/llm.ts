@@ -521,7 +521,7 @@ JSON 字段：
 async function createTextResponse(input: { instructions: string; input: string }): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const status = getLlmStatus();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort("backend ai timeout"), 8 * 60 * 1000);
+  const timeout = setTimeout(() => controller.abort("backend ai timeout"), 11 * 60 * 1000);
 
   try {
     const response = await completeWithBackendAi({

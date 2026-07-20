@@ -1170,6 +1170,15 @@ function mergeBackendAccountWithLocalState(account: Account, local?: Account): A
   };
 }
 
+const ASYNC_ROUTE_POLL_INTERVAL_MS = 30_000;
+const ASYNC_ROUTE_MAX_POLL_ATTEMPTS = 20;
+
+async function waitForNextAsyncRoutePoll(ms: number) {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 export function XhsMasterApp() {
   const localTemplates = useMemo(() => buildLocalTemplates(), []);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -1344,6 +1353,32 @@ export function XhsMasterApp() {
   function updateSelectedAccount(mutator: (account: Account) => Account) {
     if (!selected) return;
     setAccounts((current) => current.map((account) => (account.id === selected.id ? mutator(account) : account)));
+  }
+
+  async function waitForAsyncRouteResult<T>(url: string, uuid: string) {
+    for (let attempt = 0; attempt < ASYNC_ROUTE_MAX_POLL_ATTEMPTS; attempt += 1) {
+      await waitForNextAsyncRoutePoll(ASYNC_ROUTE_POLL_INTERVAL_MS);
+      const res = await fetch(`${url}?uuid=${encodeURIComponent(uuid)}`, {
+        method: "GET",
+        headers: { "content-type": "application/json" },
+        cache: "no-store"
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "任务结果查询失败。");
+      }
+      if (data.status === "completed") {
+        return data.result as T;
+      }
+      if (data.status === "failed") {
+        throw new Error(data.error || "任务执行失败。");
+      }
+      if (data.status !== "pending") {
+        throw new Error("任务状态异常。");
+      }
+    }
+
+    throw new Error("处理超时，请稍后重试。");
   }
 
   async function generateAndPersistStrategy(account: Account) {
@@ -1669,26 +1704,33 @@ export function XhsMasterApp() {
       setLoading(false);
       return;
     }
-    setReferenceDraft((current) => ({ ...current, research: data.research, summary: data.summary }));
-    if (data.account) {
+      const resolved = data.async && data.uuid
+        ? await waitForAsyncRouteResult<{
+          research: ReferenceResearch;
+          summary: { summaryMarkdown: string; contentFeatures: string; personaInsights: string; strategyInsights: string };
+          account?: { referenceAccounts: string; strategy?: Account["strategy"]; profile?: Account["profile"] };
+        }>(`/api/accounts/${selected.id}/reference-research`, data.uuid)
+      : data;
+    setReferenceDraft((current) => ({ ...current, research: resolved.research, summary: resolved.summary }));
+    if (resolved.account) {
       updateSelectedAccount((account) => ({
         ...account,
-        referenceAccounts: data.account.referenceAccounts,
-        strategy: data.account.strategy || account.strategy,
-        profile: data.account.profile || account.profile,
+        referenceAccounts: resolved.account.referenceAccounts,
+        strategy: resolved.account.strategy || account.strategy,
+        profile: resolved.account.profile || account.profile,
         referenceResearches: [
-          data.research,
-          ...(account.referenceResearches || []).filter((item) => item.id !== data.research.id)
+          resolved.research,
+          ...(account.referenceResearches || []).filter((item) => item.id !== resolved.research.id)
         ]
       }));
       await updateBackendAccount({
         id: selected.id,
-        referenceAccounts: data.account.referenceAccounts,
-        strategyMarkdown: data.account.strategy?.markdown || "",
-        profileContent: data.account.profile?.content || ""
+        referenceAccounts: resolved.account.referenceAccounts,
+        strategyMarkdown: resolved.account.strategy?.markdown || "",
+        profileContent: resolved.account.profile?.content || ""
       });
     }
-    setProfileContent(data.account?.profile?.content || profileContent);
+    setProfileContent(resolved.account?.profile?.content || profileContent);
     setLoading(false);
     showToast("已基于爆款研究增强策划案和配置文件。");
   }
@@ -1732,12 +1774,19 @@ export function XhsMasterApp() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "保存图片风格研究失败。");
-      setImageStyleDraft((current) => ({ ...current, study: data.study, summary: data.summary }));
+      const resolved = data.async && data.uuid
+        ? await waitForAsyncRouteResult<{
+            study: ImageStyleStudy;
+            summary: { summaryMarkdown: string; styleBrief: string[] };
+            warning?: string;
+          }>(`/api/accounts/${selected.id}/image-style-study`, data.uuid)
+        : data;
+      setImageStyleDraft((current) => ({ ...current, study: resolved.study, summary: resolved.summary }));
       updateSelectedAccount((account) => ({
         ...account,
-        imageStyleStudies: [data.study, ...(account.imageStyleStudies || []).filter((item) => item.id !== data.study.id)]
+        imageStyleStudies: [resolved.study, ...(account.imageStyleStudies || []).filter((item) => item.id !== resolved.study.id)]
       }));
-      showToast(data.warning || "图片风格研究已总结，后续图片方案会自动引用。");
+      showToast(resolved.warning || "图片风格研究已总结，后续图片方案会自动引用。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "保存图片风格研究失败。");
     } finally {
@@ -1802,12 +1851,19 @@ export function XhsMasterApp() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "保存目标用户互动结果失败。");
-      setInteractionDraft((current) => ({ ...current, plan: data.plan, summary: data.summary }));
+      const resolved = data.async && data.uuid
+        ? await waitForAsyncRouteResult<{
+            plan: InteractionPlan;
+            summary: { targetUsersMarkdown: string; commentDraftsMarkdown: string };
+            warning?: string;
+          }>(`/api/accounts/${selected.id}/interaction-plan`, data.uuid)
+        : data;
+      setInteractionDraft((current) => ({ ...current, plan: resolved.plan, summary: resolved.summary }));
       updateSelectedAccount((account) => ({
         ...account,
-        interactionPlans: [data.plan, ...(account.interactionPlans || []).filter((item) => item.id !== data.plan.id)]
+        interactionPlans: [resolved.plan, ...(account.interactionPlans || []).filter((item) => item.id !== resolved.plan.id)]
       }));
-      showToast(data.warning || "目标用户互动策略已生成。");
+      showToast(resolved.warning || "目标用户互动策略已生成。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "保存目标用户互动结果失败。");
     } finally {

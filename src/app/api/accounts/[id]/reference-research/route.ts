@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { createAsyncRouteTask, getAsyncRouteTask } from "@/lib/asyncRouteTask";
 import { buildAccountStrategy } from "@/lib/strategy";
 import { regenerateStrategyFromReferenceResearchWithLlm, summarizeReferenceResearchWithLlm } from "@/lib/llm";
 import { getTemplateByKey } from "@/data/accountTypeTemplates";
@@ -55,6 +56,123 @@ function getErrorMessage(error: unknown) {
   return "爆款研究处理失败";
 }
 
+async function buildReferenceResearchResult(body: z.infer<typeof bodySchema>) {
+  const account = {
+    ...body.account,
+    createdAt: new Date(0),
+    updatedAt: new Date(0)
+  };
+  const templateSeed = getTemplateByKey(account.accountType);
+  const template = {
+    id: 0,
+    typeKey: templateSeed.typeKey,
+    name: templateSeed.name,
+    defaultColumns: JSON.stringify(templateSeed.defaultColumns),
+    weeklyRatio: JSON.stringify(templateSeed.weeklyRatio),
+    imageStrategy: JSON.stringify(templateSeed.imageStrategy),
+    titleStrategy: JSON.stringify(templateSeed.titleStrategy),
+    coverStrategy: JSON.stringify(templateSeed.coverStrategy),
+    interactionStrategy: JSON.stringify(templateSeed.interactionStrategy),
+    commercializationPath: JSON.stringify(templateSeed.commercializationPath),
+    riskRules: JSON.stringify(templateSeed.riskRules),
+    promptRules: JSON.stringify(templateSeed.promptRules),
+    createdAt: new Date(0),
+    updatedAt: new Date(0)
+  };
+
+  const rawResults = String(body.rawResults || "");
+  const selectedAccounts = String(body.selectedAccounts || "");
+  if (!rawResults.trim()) {
+    throw new Error("请先粘贴 xiaohongshu_auto_op 返回结果。");
+  }
+
+  const summaryResult = await summarizeReferenceResearchWithLlm({
+    account: account as never,
+    template: template as never,
+    rawResults,
+    selectedAccounts
+  });
+
+  if (!summaryResult.usedLlm) {
+    throw new Error(`OpenAI API 未能完成参考账号总结：${summaryResult.error || "未知错误"}`);
+  }
+
+  const research = {
+    id: body.researchId || Date.now(),
+    accountId: account.id,
+    searchKeywords: buildReferenceResearchKeywords(account as never, template as never),
+    commandJson: JSON.stringify(buildReferenceResearchCommands(account as never, template as never), null, 2),
+    researchPrompt: buildReferenceResearchPrompt(account as never, template as never),
+    rawResults,
+    selectedAccounts,
+    summaryMarkdown: summaryResult.data.summaryMarkdown,
+    contentFeatures: summaryResult.data.contentFeatures,
+    personaInsights: summaryResult.data.personaInsights,
+    strategyInsights: summaryResult.data.strategyInsights,
+    status: "已总结"
+  };
+
+  const updatedAccount = {
+    ...account,
+    referenceAccounts: [
+      selectedAccounts ? `## 人工标记参考账号\n${selectedAccounts}` : "",
+      `## 参考账号内容特色\n${summaryResult.data.contentFeatures}`,
+      `## 人设洞察\n${summaryResult.data.personaInsights}`,
+      `## 策略洞察\n${summaryResult.data.strategyInsights}`
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+  };
+
+  const fallbackStrategy = buildAccountStrategy(updatedAccount as never, template as never);
+  const strategyResult = await regenerateStrategyFromReferenceResearchWithLlm({
+    account: updatedAccount as never,
+    template: template as never,
+    referenceSummary: {
+      summaryMarkdown: research.summaryMarkdown,
+      contentFeatures: research.contentFeatures,
+      personaInsights: research.personaInsights,
+      strategyInsights: research.strategyInsights,
+      rawResults: research.rawResults,
+      selectedAccounts: research.selectedAccounts
+    },
+    fallback: fallbackStrategy
+  });
+
+  if (!strategyResult.usedLlm) {
+    throw new Error(`OpenAI API 未能基于爆款研究重生成策划案：${strategyResult.error || "未知错误"}`);
+  }
+
+  return {
+    research,
+    summary: summaryResult.data,
+    account: {
+      ...updatedAccount,
+      strategy: {
+        markdown: strategyResult.data.markdown,
+        positioning: strategyResult.data.positioning,
+        execGuide: strategyResult.data.execGuide
+      },
+      profile: {
+        content: strategyResult.data.agentsMdContent,
+        version: (body.account.profile?.version || 0) + 1,
+        path: body.account.profile?.path || body.account.profilePath || ""
+      }
+    }
+  };
+}
+
+export async function GET(request: Request) {
+  const uuid = new URL(request.url).searchParams.get("uuid")?.trim();
+  if (!uuid) return NextResponse.json({ error: "缺少 uuid" }, { status: 400 });
+
+  const task = getAsyncRouteTask<Awaited<ReturnType<typeof buildReferenceResearchResult>>>(uuid);
+  if (!task) return NextResponse.json({ error: "任务不存在或已过期" }, { status: 404 });
+  if (task.status === "pending") return NextResponse.json({ async: true, uuid, status: "pending" });
+  if (task.status === "failed") return NextResponse.json({ async: true, uuid, status: "failed", error: task.error || "任务执行失败" });
+  return NextResponse.json({ async: true, uuid, status: "completed", result: task.result });
+}
+
 export async function POST(request: Request) {
   try {
     const body = bodySchema.parse(await request.json().catch(() => ({})));
@@ -101,92 +219,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ research, commands, researchPrompt });
     }
 
-    const rawResults = String(body.rawResults || "");
-    const selectedAccounts = String(body.selectedAccounts || "");
-    if (!rawResults.trim()) {
-      return NextResponse.json({ error: "请先粘贴 xiaohongshu_auto_op 返回结果。" }, { status: 400 });
-    }
-
-    const summaryResult = await summarizeReferenceResearchWithLlm({
-      account: account as never,
-      template: template as never,
-      rawResults,
-      selectedAccounts
-    });
-
-    if (!summaryResult.usedLlm) {
-      return NextResponse.json(
-        { error: `OpenAI API 未能完成参考账号总结：${summaryResult.error || "未知错误"}` },
-        { status: 502 }
-      );
-    }
-
-    const research = {
-      id: body.researchId || Date.now(),
-      accountId: account.id,
-      searchKeywords: buildReferenceResearchKeywords(account as never, template as never),
-      commandJson: JSON.stringify(buildReferenceResearchCommands(account as never, template as never), null, 2),
-      researchPrompt: buildReferenceResearchPrompt(account as never, template as never),
-      rawResults,
-      selectedAccounts,
-      summaryMarkdown: summaryResult.data.summaryMarkdown,
-      contentFeatures: summaryResult.data.contentFeatures,
-      personaInsights: summaryResult.data.personaInsights,
-      strategyInsights: summaryResult.data.strategyInsights,
-      status: "已总结"
-    };
-
-    const updatedAccount = {
-      ...account,
-      referenceAccounts: [
-        selectedAccounts ? `## 人工标记参考账号\n${selectedAccounts}` : "",
-        `## 参考账号内容特色\n${summaryResult.data.contentFeatures}`,
-        `## 人设洞察\n${summaryResult.data.personaInsights}`,
-        `## 策略洞察\n${summaryResult.data.strategyInsights}`
-      ]
-        .filter(Boolean)
-        .join("\n\n")
-    };
-
-    const fallbackStrategy = buildAccountStrategy(updatedAccount as never, template as never);
-    const strategyResult = await regenerateStrategyFromReferenceResearchWithLlm({
-      account: updatedAccount as never,
-      template: template as never,
-      referenceSummary: {
-        summaryMarkdown: research.summaryMarkdown,
-        contentFeatures: research.contentFeatures,
-        personaInsights: research.personaInsights,
-        strategyInsights: research.strategyInsights,
-        rawResults: research.rawResults,
-        selectedAccounts: research.selectedAccounts
-      },
-      fallback: fallbackStrategy
-    });
-
-    if (!strategyResult.usedLlm) {
-      return NextResponse.json(
-        { error: `OpenAI API 未能基于爆款研究重生成策划案：${strategyResult.error || "未知错误"}`, research },
-        { status: 502 }
-      );
-    }
-
-    return NextResponse.json({
-      research,
-      summary: summaryResult.data,
-      account: {
-        ...updatedAccount,
-        strategy: {
-          markdown: strategyResult.data.markdown,
-          positioning: strategyResult.data.positioning,
-          execGuide: strategyResult.data.execGuide
-        },
-        profile: {
-          content: strategyResult.data.agentsMdContent,
-          version: (body.account.profile?.version || 0) + 1,
-          path: body.account.profile?.path || body.account.profilePath || ""
-        }
-      }
-    });
+    const task = createAsyncRouteTask(() => buildReferenceResearchResult(body));
+    return NextResponse.json({ async: true, uuid: task.uuid, status: task.status });
   } catch (error) {
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 400 });
   }

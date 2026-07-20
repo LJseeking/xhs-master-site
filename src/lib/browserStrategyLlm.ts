@@ -157,7 +157,7 @@ function looksLikeUnsupportedResponses(text: string) {
 
 async function createTextResponse(input: { instructions: string; input: string }) {
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort("AI request timeout"), 8 * 60 * 1000);
+  const timeoutId = setTimeout(() => controller.abort("AI request timeout"), 11 * 60 * 1000);
 
   try {
     const response = await completeWithBackendAi({
@@ -170,7 +170,7 @@ async function createTextResponse(input: { instructions: string; input: string }
     }
     return response.text;
   } finally {
-    window.clearTimeout(timeoutId);
+    clearTimeout(timeoutId);
   }
 }
 
