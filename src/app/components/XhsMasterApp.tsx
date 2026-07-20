@@ -970,25 +970,7 @@ function buildLocalAccount(
 }
 
 function mapBackendAccountToUiAccount(account: BackendAccountDetail): Account {
-  const assets = (account.assets || []).map((asset) => ({
-    id: asset.id,
-    filePath: asset.filePath,
-    fileUrl: asset.fileUrl || "",
-    fileType: asset.fileType,
-    sourceType: asset.sourceType,
-    location: asset.location || "",
-    shotAt: asset.shotAt || "",
-    tags: asset.tags || "",
-    suitableTypes: asset.suitableTypes || "",
-    coverReady: Boolean(asset.coverReady),
-    used: Boolean(asset.used),
-    authorizationState: asset.authorizationState || "",
-    riskNotes: asset.riskNotes || "",
-    width: asset.width || 0,
-    height: asset.height || 0,
-    sizeBytes: asset.sizeBytes || 0,
-    hash: asset.hash || ""
-  }));
+  const assets = (account.assets || []).map((asset) => mapBackendAssetToUiAsset(asset));
   const weeklyPlans = (account.weeklyPlans || []).map((plan) => ({
     id: plan.id,
     weekStart: plan.weekStart,
@@ -1080,7 +1062,28 @@ function toBackendAsset(asset: Asset): BackendAsset {
   return {
     id: asset.id,
     filePath: asset.filePath,
-    fileUrl: asset.fileUrl || "",
+    fileType: asset.fileType,
+    sourceType: asset.sourceType,
+    location: asset.location || "",
+    shotAt: asset.shotAt || "",
+    tags: asset.tags || "",
+    suitableTypes: asset.suitableTypes || "",
+    coverReady: Boolean(asset.coverReady),
+    used: Boolean(asset.used),
+    authorizationState: asset.authorizationState || "",
+    riskNotes: asset.riskNotes || "",
+    width: asset.width || 0,
+    height: asset.height || 0,
+    sizeBytes: asset.sizeBytes || 0,
+    hash: asset.hash || ""
+  };
+}
+
+function mapBackendAssetToUiAsset(asset: BackendAsset, fallback?: Partial<Asset>): Asset {
+  return {
+    id: asset.id,
+    filePath: asset.filePath,
+    fileUrl: asset.fileUrl || fallback?.fileUrl || "",
     fileType: asset.fileType,
     sourceType: asset.sourceType,
     location: asset.location || "",
@@ -1532,30 +1535,14 @@ export function XhsMasterApp() {
         }))
       ];
       const savedAssets = await saveBackendAssets(selected.id, nextAssets.map((asset) => toBackendAsset(asset as Asset)));
-      const mappedSavedAssets = savedAssets.map((asset) => ({
-        id: asset.id,
-        filePath: asset.filePath,
-        fileUrl: asset.fileUrl || "",
-        fileType: asset.fileType,
-        sourceType: asset.sourceType,
-        location: asset.location || "",
-        shotAt: asset.shotAt || "",
-        tags: asset.tags || "",
-        suitableTypes: asset.suitableTypes || "",
-        coverReady: Boolean(asset.coverReady),
-        used: Boolean(asset.used),
-        authorizationState: asset.authorizationState || "",
-        riskNotes: asset.riskNotes || "",
-        width: asset.width || 0,
-        height: asset.height || 0,
-        sizeBytes: asset.sizeBytes || 0,
-        hash: asset.hash || ""
-      }));
+      const mappedSavedAssets = savedAssets.map((asset, index) =>
+        mapBackendAssetToUiAsset(asset, nextAssets[index] as Partial<Asset> | undefined)
+      );
 
       updateSelectedAccount((account) => ({
         ...account,
         assets: [
-          ...mappedSavedAssets.filter((asset) => !account.assets.some((current) => current.fileUrl && current.fileUrl === asset.fileUrl)),
+          ...mappedSavedAssets.filter((asset) => !account.assets.some((current) => current.filePath === asset.filePath)),
           ...account.assets
         ]
       }));
@@ -3314,25 +3301,9 @@ function ImagesPanel(props: {
     );
     return {
       count: savedAssets.length,
-      assets: savedAssets.map((asset) => ({
-        id: asset.id,
-        filePath: asset.filePath,
-        fileUrl: asset.fileUrl || "",
-        fileType: asset.fileType,
-        sourceType: asset.sourceType,
-        location: asset.location || "",
-        shotAt: asset.shotAt || "",
-        tags: asset.tags || "",
-        suitableTypes: asset.suitableTypes || "",
-        coverReady: Boolean(asset.coverReady),
-        used: Boolean(asset.used),
-        authorizationState: asset.authorizationState || "",
-        riskNotes: asset.riskNotes || "",
-        width: asset.width || 0,
-        height: asset.height || 0,
-        sizeBytes: asset.sizeBytes || 0,
-        hash: asset.hash || ""
-      }))
+      assets: savedAssets.map((asset, index) =>
+        mapBackendAssetToUiAsset(asset, ((uploadData as { assets?: Asset[] }).assets || [])[index])
+      )
     } as { count?: number; assets?: Asset[] };
   }
 
