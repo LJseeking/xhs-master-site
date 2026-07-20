@@ -540,7 +540,7 @@ function weeklyUiCopy(accountType?: string) {
       test: "例：用真实菜品文件名自动匹配图文，是否比人工挑图更稳定。",
       conversion: "例：轻量提到团购、预约、套餐、活动期限或到店路线。",
       interaction: "例：引导用户留言想吃哪道菜、人数、预算、忌口、停车交通问题。",
-      assets: "先把图片上传到后端素材库；上传后的文件名建议体现菜品名或环境名，方便后续自动识别。"
+      assets: "先把图片整理到素材库；文件名建议体现菜品名或环境名，方便后续自动识别。"
     },
     outdoor: {
       ratio: "路线日记2 / 攻略收藏1 / 装备复盘1",
@@ -1271,7 +1271,7 @@ export function XhsMasterApp() {
       postReviewPrompt,
       industryLearningDraft
     }).catch(() => {
-      // 浏览器数据库写失败时不打断当前操作，仅在后续用户动作中继续使用内存态。
+      // 工作区缓存写失败时不打断当前操作，仅在后续用户动作中继续使用内存态。
     });
   }, [
     browserReady,
@@ -1305,8 +1305,8 @@ export function XhsMasterApp() {
     let nextAccounts = localAccounts;
 
     if (getToken()) {
-      const backendAccounts = await fetchBackendAccounts().catch(() => []);
-      if (backendAccounts.length) {
+      const backendAccounts = await fetchBackendAccounts().catch(() => null);
+      if (backendAccounts) {
         const localAccountMap = new Map(localAccounts.map((account) => [account.id, account]));
         nextAccounts = backendAccounts.map((account) =>
           mergeBackendAccountWithLocalState(mapBackendAccountToUiAccount(account), localAccountMap.get(account.id))
@@ -1316,7 +1316,11 @@ export function XhsMasterApp() {
 
     setAccounts(nextAccounts);
     setTemplates(nextTemplates);
-    if (!selectedId && nextAccounts[0]) setSelectedId(nextAccounts[0].id);
+    setSelectedId((current) => {
+      if (!nextAccounts.length) return null;
+      if (current && nextAccounts.some((account) => account.id === current)) return current;
+      return nextAccounts[0].id;
+    });
     if (nextTemplates?.length) setAccountForm((current) => (current.accountType ? current : emptyAccountForm(nextTemplates)));
     return nextAccounts;
   }
@@ -1363,7 +1367,7 @@ export function XhsMasterApp() {
       if (persistedAccount.profile?.content) {
         setProfileContent(persistedAccount.profile.content);
       }
-      showToast(strategyResult.usedLlm ? "账号已创建，AI 策划案已生成并保存到后端。" : strategyResult.error || "账号已创建，并已保存默认策划案。");
+      showToast(strategyResult.usedLlm ? "账号已创建，AI 策划案已生成。" : strategyResult.error || "账号已创建，并已生成默认策划案。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "创建失败");
     } finally {
@@ -1374,7 +1378,7 @@ export function XhsMasterApp() {
   async function deleteAccount() {
     if (!selected) return;
     const confirmed = window.confirm(
-      `确定删除账号「${selected.name}」吗？\n\n会删除数据库中的账号、策划案、计划、草稿和素材记录。\n不会物理删除本地 profiles/ 和 assets/ 文件。`
+      `确定删除账号「${selected.name}」吗？\n\n相关策划案、计划、草稿和素材记录也会一起移除。`
     );
     if (!confirmed) return;
 
@@ -1383,17 +1387,21 @@ export function XhsMasterApp() {
       await deleteBackendAccount(selected.id);
       const remaining = accounts.filter((account) => account.id !== selected.id);
       const nextAccountId = remaining[0]?.id ?? null;
-      await refresh();
+      setAccounts(remaining);
       setSelectedId(nextAccountId);
+      setProfileContent("");
+      await refresh();
       setSelectedNoteId(null);
       setPromptResults({});
+      setImagePromptResults({});
+      setBatchImagePostResults({});
       setReferenceDraft({});
       setImageStyleDraft({});
       setInteractionDraft({});
       setPostReviewPrompt("");
       setIndustryLearningDraft({});
       setActiveTab(nextAccountId ? "dashboard" : "accounts");
-      showToast("账号已从后端删除。");
+      showToast("账号已删除。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "删除账号失败。");
     } finally {
@@ -1411,14 +1419,14 @@ export function XhsMasterApp() {
         : { content: profileContent, version: 1, path: account.profilePath }
     }));
     setLoading(false);
-    showToast("配置文件已保存到浏览器。");
+    showToast("配置文件已保存。");
   }
 
   async function uploadAsset(form: HTMLFormElement, files: File[], clearFiles?: () => void) {
     if (!selected) return;
     const formData = new FormData(form);
     if (!files.length) {
-      showToast("请先选择要上传到后端素材库的图片。");
+      showToast("请先选择要上传的图片。");
       return;
     }
     try {
@@ -1928,7 +1936,7 @@ export function XhsMasterApp() {
               }
         )
       }));
-      showToast("草稿已保存到后端。");
+      showToast("草稿已保存。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "保存草稿失败。");
     } finally {
@@ -2806,7 +2814,7 @@ function AssetsPanel(props: {
         </div>
         <div className="grid gap-3 md:grid-cols-4">
           <label className="field md:col-span-4">
-            <span>上传图片到后端素材库</span>
+            <span>上传图片</span>
             <input
               type="file"
               accept="image/*,video/*"
@@ -2898,7 +2906,7 @@ function AssetsPanel(props: {
                   ) : (
                     <div className="grid place-items-center gap-2 px-4 text-center text-xs text-ink/55">
                       <ImageIcon size={28} />
-                      <span>{asset.fileUrl ? "后端素材，可直接预览" : "当前素材缺少后端图片链接"}</span>
+                      <span>{asset.fileUrl ? "素材可直接预览" : "当前素材缺少可访问图片链接"}</span>
                     </div>
                   )}
                 </div>
@@ -3351,7 +3359,7 @@ function ImagesPanel(props: {
 
               <div className="mt-3 grid gap-3">
                 <label className="field">
-                  <span>本次先上传图片到后端素材库（可选）</span>
+                  <span>本次先上传图片（可选）</span>
                   <input
                     type="file"
                     accept="image/*"
@@ -3450,7 +3458,7 @@ function ImagesPanel(props: {
                     });
                     const uploadedUrls = (uploadData.assets || []).map((asset) => String(asset.fileUrl || "").trim());
                     if (!uploadedUrls.length || uploadedUrls.some((url) => !/^https?:\/\//i.test(url))) {
-                      throw new Error("上传成功，但后端未返回 OpenClaw 可访问的完整图片 URL。");
+                      throw new Error("上传成功，但未返回 OpenClaw 可访问的完整图片 URL。");
                     }
                     imagePaths = [imagePaths, uploadedUrls.join("\n")].filter(Boolean).join("\n");
                     onAssetsAdded(uploadData.assets || []);
@@ -3494,7 +3502,7 @@ function ImagesPanel(props: {
                 <div className="mb-2 text-sm font-medium text-ink/70">图片来源</div>
                 <div className="grid gap-2 md:grid-cols-2">
                   {[
-                    ["remote_images", "多张远程图片", "从素材库多选已经上传到后端的图片。"],
+                    ["remote_images", "多张远程图片", "从素材库多选可直接使用的图片。"],
                     ["ai_generate", "AI 辅助图", "没有真实图时，只生成信息卡、结构图或低拟真辅助画面。"]
                   ].map(([mode, title, desc]) => (
                     <button
@@ -3543,7 +3551,7 @@ function ImagesPanel(props: {
                 {singleSourceMode === "remote_images" && (
                   <>
                     <div className="grid gap-1.5 text-sm">
-                      <span className="text-xs font-medium text-ink/60">本篇先上传图片到后端素材库（可选）</span>
+                      <span className="text-xs font-medium text-ink/60">本篇先上传图片（可选）</span>
                       <label htmlFor="single-remote-image-files" className="secondary-button w-fit cursor-pointer">
                         <Upload size={16} />
                         {singleUploadFiles.length > 0 ? "继续添加图片" : "选择图片"}
@@ -3560,7 +3568,7 @@ function ImagesPanel(props: {
                           event.currentTarget.value = "";
                         }}
                       />
-                      <span className="text-xs leading-5 text-ink/50">支持一次多选或连续追加；提交时先上传并保存到当前账号的后端素材库。</span>
+                      <span className="text-xs leading-5 text-ink/50">支持一次多选或连续追加；提交时会先整理到当前账号素材中。</span>
                     </div>
                     {singleUploadFiles.length > 0 && (
                       <div className="rounded border border-teal/20 bg-teal/5 p-3">
@@ -3582,7 +3590,7 @@ function ImagesPanel(props: {
                     <RemoteAssetPicker
                       assets={selected?.assets || []}
                       pickerLabel="这篇要用的远程图片"
-                      pickerHelp="可以一次多选账号素材库里已经上传到后端的远程图。"
+                      pickerHelp="可以一次多选账号素材库里可直接使用的远程图。"
                     />
                   </>
                 )}
@@ -3843,7 +3851,7 @@ function ImagesPanel(props: {
               <RemoteAssetPicker
                 assets={selected?.assets || []}
                 pickerLabel="这篇要用的已上传素材"
-                pickerHelp="可以从账号素材库多选已经上传到后端的远程图。"
+                pickerHelp="可以从账号素材库多选可直接使用的远程图。"
               />
             </div>
           </details>
@@ -4846,7 +4854,7 @@ function weeklyPresets(accountType: string) {
         testHypothesis: "图片文件名直接使用菜名，系统按菜名匹配图片和正文，会比人工挑图更稳定。",
         commercializationMove: "轻量提到预约、套餐或适合几人来吃，不做强促销。",
         interactionGoal: "每篇引导用户留言想看哪道菜、几个人来、有没有忌口、是否需要停车信息。",
-        availableAssets: "先把图片上传到后端素材库；文件名尽量体现菜名或环境名，方便后续自动识别。"
+        availableAssets: "先把图片整理到素材库；文件名尽量体现菜名或环境名，方便后续自动识别。"
       },
       {
         name: "活动转化",

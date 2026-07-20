@@ -73,7 +73,7 @@ export async function getSystemHealth() {
       assetsExists ? "assets 目录可用。" : "assets 目录缺失。",
       uvAvailable ? `uv 可用：${uvVersion}` : "uv 不可用，请安装 uv 后再复制命令执行。",
       llm.enabled ? `OpenAI API 已配置，模型：${llm.model}` : "OpenAI API 未配置，将使用内置模板生成。",
-      "本地 SQLite/Prisma 运行时已移除；账号与内容主数据走后端，衍生研究数据走浏览器缓存。"
+      "当前内容会自动保留在工作区，继续使用时可直接接着操作。"
     ]
   };
 }

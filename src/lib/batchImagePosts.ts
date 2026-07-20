@@ -56,7 +56,7 @@ function compact(value: string | null | undefined, fallback = "未填写") {
 }
 
 function assetLines(assets: Asset[] | undefined) {
-  if (!assets?.length) return "- 后台还没有登记远程素材；请优先读取用户提供的远程图片 URL。";
+  if (!assets?.length) return "- 当前还没有可用素材；请优先读取用户提供的远程图片 URL。";
   return assets
     .slice(0, 80)
     .map((asset, index) => {
@@ -109,7 +109,7 @@ function searchKeywords(account: BatchPostAccount) {
 export function buildBatchImagePostsPrompt(account: BatchPostAccount, options: BatchPostOptions) {
   const weeks = options.weeks === 2 ? 2 : 1;
   const targetCount = weeks === 2 ? "10-14 篇" : "5-7 篇";
-  const specifiedImages = compact(options.openclawImagePaths, "未指定；请先在前端选择或填写远程图片 URL。");
+  const specifiedImages = compact(options.openclawImagePaths, "未指定；请先选择或填写远程图片 URL。");
   const planningGoal = compact(options.planningGoal, "优先从真实图片里找高收藏选题，直接形成可执行的小红书批量帖子方案。");
   const keywords = searchKeywords(account);
 
@@ -143,7 +143,7 @@ ${planningGoal}
 - 指定远程图片 URL：
 ${specifiedImages}
 
-## 后台已登记素材
+## 当前可用素材
 ${assetLines(account.assets)}
 
 ## 已有爆款研究

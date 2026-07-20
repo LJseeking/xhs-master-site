@@ -207,7 +207,7 @@ export async function generateStrategyWithBrowserLlm(account: ClientAccountInput
   const fallback = buildAccountStrategy(accountRecord as never, template as never);
   const status = getBrowserLlmStatus();
   if (!status.enabled) {
-    return { usedLlm: false, data: fallback, error: "后端 AI 未启用，已使用内置模板生成。" };
+    return { usedLlm: false, data: fallback, error: "AI 未启用，已使用内置模板生成。" };
   }
 
   const prompt = `请为一个小红书账号生成完整运营策划案和 AGENTS.md。
@@ -306,7 +306,7 @@ export async function generateWeeklyTasksWithBrowserLlm(input: {
 }> {
   const status = getBrowserLlmStatus();
   if (!status.enabled) {
-    return { usedLlm: false, data: input.fallbackTasks, error: "后端 AI 未启用，已使用内置模板生成。" };
+    return { usedLlm: false, data: input.fallbackTasks, error: "AI 未启用，已使用内置模板生成。" };
   }
 
   const prompt = `请根据账号策略、本周目标和素材情况，生成一周小红书 note_tasks。

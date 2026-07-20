@@ -21,14 +21,13 @@ function buildTemplates() {
 export async function GET() {
   return NextResponse.json({
     accounts: [],
-    templates: buildTemplates(),
-    note: "本地 SQLite/Prisma 账号列表已移除；请直接使用后端账号接口与浏览器缓存。"
+    templates: buildTemplates()
   });
 }
 
 export async function POST() {
   return NextResponse.json(
-    { error: "本地账号创建接口已移除，请直接使用后端账号创建流程。" },
+    { error: "当前入口暂不支持创建账号，请回到账号页继续操作。" },
     { status: 410 }
   );
 }

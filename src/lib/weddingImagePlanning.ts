@@ -23,7 +23,7 @@ function compact(value: string | null | undefined, fallback = "未填写") {
 }
 
 function assetLines(assets: Asset[] | undefined) {
-  if (!assets?.length) return "- 后台还没有登记婚礼素材；请优先读取用户刚上传到后端的婚礼图片链接。";
+  if (!assets?.length) return "- 当前还没有可用婚礼素材；请优先读取用户刚准备好的婚礼图片链接。";
   return assets
     .slice(0, 60)
     .map((asset, index) => {
@@ -56,7 +56,7 @@ function latestStyleBrief(account: WeddingPlanAccount) {
 export function buildWeddingImagePlanPrompt(account: WeddingPlanAccount, options: WeddingPlanOptions) {
   const weeks = options.weeks === 2 ? 2 : 1;
   const targetCount = weeks === 2 ? "10-14 篇" : "5-7 篇";
-  const specifiedImages = compact(options.openclawImagePaths, "未指定；请先在前端选择已经上传到后端的婚礼图片。");
+  const specifiedImages = compact(options.openclawImagePaths, "未指定；请先选择婚礼图片。");
   const planningGoal = compact(options.planningGoal, "优先从真实婚礼图片里找高收藏细节，直接形成可执行的小红书批量帖子方案。");
 
   return `# 给龙虾 skill 的婚礼批量帖子生成 Prompt
@@ -65,7 +65,7 @@ export function buildWeddingImagePlanPrompt(account: WeddingPlanAccount, options
 只读研究 + 远程图片分析 + 生成方案。不得发布、评论、点赞、收藏、关注或私信。
 
 ## 任务目标
-客户会先上传约 30 张真实婚礼现场图片到后端素材库。请你读取这些后端返回的图片链接，识别图片中的优秀细节；再只读研究小红书全国范围内同类型婚礼公司、婚礼策划、婚礼布置、备婚灵感类爆款笔记；最后把“真实图片特点”和“全国同行爆款表达方式”合并，直接输出 ${weeks} 周小红书批量帖子方案（${targetCount}）。
+客户会先准备约 30 张真实婚礼现场图片。请你读取这些图片链接，识别图片中的优秀细节；再只读研究小红书全国范围内同类型婚礼公司、婚礼策划、婚礼布置、备婚灵感类爆款笔记；最后把“真实图片特点”和“全国同行爆款表达方式”合并，直接输出 ${weeks} 周小红书批量帖子方案（${targetCount}）。
 
 重要原则：同行爆款内容分析不能局限在账号当地。必须优先搜索全国同类型热门内容，充分学习成熟账号的标题节奏、封面文字、图集顺序、细节命名、情绪表达和评论痛点；本地城市内容只作为落地差异、价格语境、用户咨询习惯的补充对照，不能限制整体风格。
 
@@ -89,7 +89,7 @@ ${planningGoal}
 - 指定婚礼已上传图片链接：
 ${specifiedImages}
 
-## 后台已登记素材
+## 当前可用素材
 ${assetLines(account.assets)}
 
 ## 已有参考研究

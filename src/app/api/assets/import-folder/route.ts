@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     coverReady: Boolean(body.coverReady),
     used: false,
     authorizationState: String(body.authorizationState || "已授权"),
-    riskNotes: String(body.riskNotes || "本地文件夹批量登记；图改图前仍需确认素材与真实业务/经历一致。")
+    riskNotes: String(body.riskNotes || "批量登记导入；图改图前仍需确认素材与真实业务/经历一致。")
   }));
 
   return NextResponse.json({
@@ -70,6 +70,6 @@ export async function POST(request: Request) {
     imported: newFiles.length,
     skipped: mediaFiles.length - newFiles.length,
     assets,
-    note: "已登记本地文件夹中的图片/视频。文件没有被复制，龙虾可直接读取该文件夹路径。"
+    note: "已登记所选文件夹中的图片/视频，可直接继续使用。"
   });
 }

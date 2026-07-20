@@ -177,7 +177,7 @@ export async function POST(request: Request, _context: { params: { id: string } 
   }
   const remoteImageUrls = nonEmptyLines(openclawImagePaths);
   if (imageSourceMode === "remote_images" && (!remoteImageUrls.length || remoteImageUrls.some((url) => !/^https?:\/\//i.test(url)))) {
-    return NextResponse.json({ error: "请选择至少一张具有完整 HTTP(S) URL 的后端素材图片。" }, { status: 400 });
+    return NextResponse.json({ error: "请选择至少一张带完整 HTTP(S) 链接的图片。" }, { status: 400 });
   }
 
   const latestReference = account.referenceResearches?.[0];

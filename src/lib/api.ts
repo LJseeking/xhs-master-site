@@ -1,5 +1,5 @@
 /**
- * 后端 API 客户端工具
+ * 账号 API 客户端工具
  * 默认测试服: http://xhsapitest.powermatrix.tech/client
  */
 import { getBackendApiBaseUrl } from "@/lib/backendApi";
@@ -389,7 +389,7 @@ export async function syncBackendAccounts() {
   };
 
   if (!res.ok || !data.ok) {
-    throw new Error(data.error || "同步后端账号失败");
+    throw new Error(data.error || "同步账号失败");
   }
 
   return data;

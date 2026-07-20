@@ -79,7 +79,7 @@ export async function POST(request: Request, context: { params: { id: string } }
     }).catch((error) => ({
       usedLlm: false as const,
       data: fallbackInteractionSummary(rawResults),
-      error: error instanceof Error ? error.message : "后端 AI 总结失败"
+      error: error instanceof Error ? error.message : "AI 总结失败"
     }));
 
     const savedPlan = {

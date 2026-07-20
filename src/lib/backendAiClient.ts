@@ -32,7 +32,7 @@ export async function completeWithBackendAi(input: {
     };
 
     if (!response.ok || !json.status || !json.data?.text) {
-      return { ok: false, error: json.message || "后端 AI 接口调用失败。" };
+      return { ok: false, error: json.message || "AI 接口调用失败。" };
     }
 
     return {
@@ -41,6 +41,6 @@ export async function completeWithBackendAi(input: {
       model: json.data.model || ""
     };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "后端 AI 接口调用失败。" };
+    return { ok: false, error: error instanceof Error ? error.message : "AI 接口调用失败。" };
   }
 }

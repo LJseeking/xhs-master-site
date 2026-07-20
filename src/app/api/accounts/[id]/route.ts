@@ -11,8 +11,7 @@ export async function PATCH(request: Request, context: { params: { id: string } 
 
   return NextResponse.json({
     id,
-    ...body,
-    note: "本地 SQLite/Prisma 账号 PATCH 已移除；当前仅保留文件写入与浏览器缓存兼容返回。"
+    ...body
   });
 }
 
@@ -21,7 +20,6 @@ export async function DELETE(_request: Request, context: { params: { id: string 
   return NextResponse.json({
     ok: true,
     deletedId: id,
-    nextAccountId: null,
-    note: "本地 SQLite/Prisma 账号删除已移除；请直接调用后端删除接口。"
+    nextAccountId: null
   });
 }

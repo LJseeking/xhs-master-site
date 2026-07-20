@@ -55,7 +55,7 @@ export async function generateStrategyWithLlm(
   fallback: StrategyBundle
 ): Promise<LlmResult<StrategyBundle>> {
   const status = getLlmStatus();
-  if (!status.enabled) return { usedLlm: false, data: fallback, error: "后端 AI 未启用，已使用内置模板生成。" };
+  if (!status.enabled) return { usedLlm: false, data: fallback, error: "AI 未启用，已使用内置模板生成。" };
 
   const prompt = `请为一个小红书账号生成完整运营策划案和 AGENTS.md。
 
@@ -155,7 +155,7 @@ export async function regenerateStrategyFromReferenceResearchWithLlm(input: {
 }): Promise<LlmResult<StrategyBundle>> {
   const status = getLlmStatus();
   if (!status.enabled) {
-      return { usedLlm: false, data: input.fallback, error: "后端 AI 未启用，无法基于参考账号研究重生成策划案与 AGENTS.md。" };
+      return { usedLlm: false, data: input.fallback, error: "AI 未启用，暂时无法基于参考账号研究重生成策划案与 AGENTS.md。" };
   }
 
   const prompt = `请严格基于“参考账号研究结果”重生成小红书账号策划案和 AGENTS.md。
@@ -235,7 +235,7 @@ export async function generateWeeklyTasksWithLlm(input: {
   fallbackTasks: NoteTaskSeed[];
 }): Promise<LlmResult<NoteTaskSeed[]>> {
   const status = getLlmStatus();
-  if (!status.enabled) return { usedLlm: false, data: input.fallbackTasks, error: "后端 AI 未启用，已使用内置模板生成。" };
+  if (!status.enabled) return { usedLlm: false, data: input.fallbackTasks, error: "AI 未启用，已使用内置模板生成。" };
 
   const prompt = `请根据账号策略、本周目标和素材情况，生成一周小红书 note_tasks。
 
@@ -340,7 +340,7 @@ export async function summarizeReferenceResearchWithLlm(input: {
 }): Promise<LlmResult<{ summaryMarkdown: string; contentFeatures: string; personaInsights: string; strategyInsights: string }>> {
   const fallback = fallbackReferenceSummary(input.rawResults);
   const status = getLlmStatus();
-  if (!status.enabled) return { usedLlm: false, data: fallback, error: "后端 AI 未启用，已保存原始结果并使用占位总结。" };
+  if (!status.enabled) return { usedLlm: false, data: fallback, error: "AI 未启用，已保存原始结果并使用占位总结。" };
 
   const prompt = `请总结 xiaohongshu_auto_op 返回的同类型参考账号研究结果，并给出我方账号策划建议。
 
@@ -399,7 +399,7 @@ export async function summarizeInteractionCandidatesWithLlm(input: {
 }): Promise<LlmResult<{ targetUsersMarkdown: string; commentDraftsMarkdown: string }>> {
   const fallback = fallbackInteractionSummary(input.rawResults);
   const status = getLlmStatus();
-  if (!status.enabled) return { usedLlm: false, data: fallback, error: "后端 AI 未启用，已保存原始结果并使用人工整理框架。" };
+  if (!status.enabled) return { usedLlm: false, data: fallback, error: "AI 未启用，已保存原始结果并使用人工整理框架。" };
 
   const prompt = `请分析 xiaohongshu_auto_op 返回的目标用户搜索结果，并生成评论互动策略。
 
@@ -468,7 +468,7 @@ export async function summarizeImageStyleStudyWithLlm(input: {
 }): Promise<LlmResult<{ summaryMarkdown: string; styleBrief: string[] }>> {
   const fallback = summarizeImageStyleStudyFallback(input.account, input.rawResults);
   const status = getLlmStatus();
-  if (!status.enabled) return { usedLlm: false, data: fallback, error: "后端 AI 未启用，已使用本地规则整理图片风格摘要。" };
+  if (!status.enabled) return { usedLlm: false, data: fallback, error: "AI 未启用，已使用整理规则生成图片风格摘要。" };
 
   const prompt = `请总结 xiaohongshu_auto_op 返回的小红书图片风格研究结果。
 
@@ -534,7 +534,7 @@ async function createTextResponse(input: { instructions: string; input: string }
     if (!response.ok) return { ok: false, error: response.error };
     return { ok: true, text: response.text };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "后端 AI 调用失败。" };
+    return { ok: false, error: error instanceof Error ? error.message : "AI 调用失败。" };
   } finally {
     clearTimeout(timeout);
   }

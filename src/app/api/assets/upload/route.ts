@@ -64,7 +64,7 @@ async function createSignedUpload(file: File, request: Request) {
 
   const data = (await res.json()) as BackendResponse<SignedUploadUrlResponse>;
   if (!res.ok || !data.status || !data.data?.signedUrl || !data.data?.url) {
-    throw new Error(data.message || "获取后端上传地址失败。");
+    throw new Error(data.message || "获取上传地址失败。");
   }
 
   return data.data;
@@ -100,10 +100,10 @@ async function createBatchSignedUploads(files: File[], request: Request) {
 
   const data = (await res.json()) as BackendResponse<BatchSignedUploadUrlResponse>;
   if (!res.ok || !data.status || !Array.isArray(data.data?.items)) {
-    throw new Error(data.message || "获取后端批量上传地址失败。");
+    throw new Error(data.message || "获取批量上传地址失败。");
   }
   if (data.data.items.length !== files.length) {
-    throw new Error("后端批量上传地址数量和文件数量不一致。");
+    throw new Error("批量上传地址数量和文件数量不一致。");
   }
 
   return data.data.items;

@@ -20,10 +20,10 @@
     "env:local": "node scripts/switch-env.js local",
     "env:test": "node scripts/switch-env.js test",
     "env:prod": "node scripts/switch-env.js prod",
-    "prisma:generate": "echo Prisma/SQLite runtime has been removed.",
-    "prisma:migrate": "echo Prisma/SQLite runtime has been removed.",
-    "prisma:seed": "echo Prisma/SQLite runtime has been removed.",
-    "db:init": "echo Prisma/SQLite runtime has been removed."
+    "prisma:generate": "echo 当前项目无需执行数据库生成。",
+    "prisma:migrate": "echo 当前项目无需执行数据库迁移。",
+    "prisma:seed": "echo 当前项目无需执行数据库种子。",
+    "db:init": "echo 当前项目无需执行数据库初始化。"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

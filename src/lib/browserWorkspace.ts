@@ -21,7 +21,7 @@ function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = window.indexedDB.open(DB_NAME, DB_VERSION);
 
-    request.onerror = () => reject(request.error || new Error("打开浏览器数据库失败。"));
+    request.onerror = () => reject(request.error || new Error("打开工作区缓存失败。"));
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
@@ -42,7 +42,7 @@ export async function loadBrowserWorkspace(): Promise<BrowserWorkspaceSnapshot> 
       const store = tx.objectStore(STORE_NAME);
       const request = store.get(SNAPSHOT_KEY);
 
-      request.onerror = () => reject(request.error || new Error("读取浏览器数据库失败。"));
+      request.onerror = () => reject(request.error || new Error("读取工作区缓存失败。"));
       request.onsuccess = () => resolve((request.result as BrowserWorkspaceSnapshot | undefined) || {});
     });
   } finally {
@@ -60,9 +60,9 @@ export async function saveBrowserWorkspace(snapshot: BrowserWorkspaceSnapshot) {
       const store = tx.objectStore(STORE_NAME);
       const request = store.put(snapshot, SNAPSHOT_KEY);
 
-      request.onerror = () => reject(request.error || new Error("写入浏览器数据库失败。"));
+      request.onerror = () => reject(request.error || new Error("保存工作区缓存失败。"));
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error || new Error("写入浏览器数据库失败。"));
+      tx.onerror = () => reject(tx.error || new Error("保存工作区缓存失败。"));
     });
   } finally {
     db.close();
