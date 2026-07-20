@@ -62,7 +62,7 @@ export function buildWeddingImagePlanPrompt(account: WeddingPlanAccount, options
   return `# 给龙虾 skill 的婚礼批量帖子生成 Prompt
 
 ## 当前执行模式
-只读研究 + 远程图片分析 + 生成方案。不得发布、评论、点赞、收藏、关注或私信。
+只读研究 + 素材库图片分析 + 生成方案。不得发布、评论、点赞、收藏、关注或私信。
 
 ## 任务目标
 客户会先准备约 30 张真实婚礼现场图片。请你读取这些图片链接，识别图片中的优秀细节；再只读研究小红书全国范围内同类型婚礼公司、婚礼策划、婚礼布置、备婚灵感类爆款笔记；最后把“真实图片特点”和“全国同行爆款表达方式”合并，直接输出 ${weeks} 周小红书批量帖子方案（${targetCount}）。
@@ -85,7 +85,7 @@ export function buildWeddingImagePlanPrompt(account: WeddingPlanAccount, options
 ## 本次额外目标
 ${planningGoal}
 
-## 远程图片输入
+## 素材库图片输入
 - 指定婚礼已上传图片链接：
 ${specifiedImages}
 
@@ -158,7 +158,7 @@ export function buildWeddingImagePlanCommands(account: WeddingPlanAccount, optio
     {
       category: "批量分析婚礼现场图片并生成帖子",
       command: `${base} xhs-content-ops draft-note --prompt-file ${q(options.promptFile)} ${accountFlag} --safe-mode`,
-      description: `读取约 30 张婚礼远程图片，先识别蛋糕、花艺、仪式区、迎宾区、桌花、席位卡等细节，再结合全国同行爆款研究，输出 ${options.weeks === 2 ? "两周" : "一周"}批量帖子方案。`,
+      description: `读取约 30 张婚礼素材库图片，先识别蛋糕、花艺、仪式区、迎宾区、桌花、席位卡等细节，再结合全国同行爆款研究，输出 ${options.weeks === 2 ? "两周" : "一周"}批量帖子方案。`,
       safetyNote: "只生成规划和草稿建议；新人肖像、场地、价格、档期、套餐和授权必须人工核验。"
     }
   ];

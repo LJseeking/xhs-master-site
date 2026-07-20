@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
-import { buildNoteTasks } from "@/lib/weeklyPlan";
+import { buildNoteTasks, clampWeeklyFrequency, normalizeWeeklyRatio } from "@/lib/weeklyPlan";
 import { generateWeeklyTasksWithLlm } from "@/lib/llm";
 
 export async function POST(request: Request) {
   const body = await request.json();
   const account = body.account;
   if (!account) return NextResponse.json({ error: "账号不存在" }, { status: 404 });
+  const frequency = clampWeeklyFrequency(body.frequency);
+  const ratio = normalizeWeeklyRatio(String(body.ratio || ""), frequency);
 
   const plan = {
     id: Date.now(),
@@ -13,8 +15,8 @@ export async function POST(request: Request) {
     weekStart: body.weekStart || new Date().toISOString().slice(0, 10),
     theme: body.theme || "本周主题",
     goal: body.goal || "验证内容方向并积累可复用素材",
-    frequency: Number(body.frequency || 5),
-    ratio: body.ratio || "",
+    frequency,
+    ratio,
     testHypothesis: body.testHypothesis || "",
     commercializationMove: body.commercializationMove || "",
     interactionGoal: body.interactionGoal || "",
@@ -25,7 +27,7 @@ export async function POST(request: Request) {
     updatedAt: new Date()
   };
 
-  const weeklyInput = { ...body, frequency: Number(body.frequency || 5) };
+  const weeklyInput = { ...body, frequency, ratio };
   const fallbackTasks = buildNoteTasks(account, account.strategy, account.assets || [], weeklyInput, plan);
   const llmResult = await generateWeeklyTasksWithLlm({
     account,

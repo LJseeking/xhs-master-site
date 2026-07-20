@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { ShieldCheck, Mail, Lock, User, Loader2 } from "lucide-react";
+import { Mail, Lock, User, Loader2 } from "lucide-react";
 import { login, register, isLoggedIn } from "@/lib/api";
 
 export default function LoginPage() {
@@ -47,8 +48,16 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         {/* Logo 区域 */}
         <div className="mb-8 text-center">
-          <div className="inline-flex items-center gap-2 rounded bg-teal/10 px-3 py-1.5 text-sm font-medium text-teal">
-            <ShieldCheck size={16} /> xhs-master-site
+          <div className="inline-flex items-center gap-3 text-left">
+            <Image
+              src="/xhs-master-logo.png"
+              alt="小红书运营策划大师 Logo"
+              width={200}
+              height={200}
+              priority
+              className="h-14 w-14 shrink-0 rounded-md object-cover"
+            />
+            <div className="text-lg font-semibold leading-6 text-ink">小红书运营策划大师</div>
           </div>
           <h1 className="mt-4 text-2xl font-semibold text-ink">
             {mode === "login" ? "登录" : "注册账号"}
