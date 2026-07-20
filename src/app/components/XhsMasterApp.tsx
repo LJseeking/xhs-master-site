@@ -1219,13 +1219,19 @@ export function XhsMasterApp() {
   const selectedNote = latestPlan?.noteTasks?.find((task) => task.id === selectedNoteId) ?? latestPlan?.noteTasks?.[0];
 
   useEffect(() => {
+    const hasToken = Boolean(getToken());
     setCurrentUser(getUser());
     setTemplates(localTemplates);
     loadBrowserWorkspace()
       .then((snapshot) => {
-        setAccounts((snapshot.accounts as Account[]) || []);
+        if (!hasToken) {
+          setAccounts((snapshot.accounts as Account[]) || []);
+          setSelectedId(typeof snapshot.selectedId === "number" ? snapshot.selectedId : null);
+        } else {
+          setAccounts([]);
+          setSelectedId(null);
+        }
         setTemplates((snapshot.templates as Template[])?.length ? (snapshot.templates as Template[]) : localTemplates);
-        setSelectedId(typeof snapshot.selectedId === "number" ? snapshot.selectedId : null);
         setPromptResults((snapshot.promptResults as Record<number, PromptResult>) || {});
         setImagePromptResults((snapshot.imagePromptResults as Record<number, ImagePromptResult>) || {});
         setBatchImagePostResults((snapshot.batchImagePostResults as Record<number, BatchImagePostsResult>) || {});
@@ -1237,9 +1243,15 @@ export function XhsMasterApp() {
         return snapshot;
       })
       .then(async (snapshot) => {
-        if (!getToken()) return;
+        if (!hasToken) return;
         const backendAccounts = await fetchBackendAccounts().catch(() => []);
-        if (!backendAccounts.length) return;
+        if (!backendAccounts.length) {
+          setAccounts([]);
+          setSelectedId(null);
+          setSelectedNoteId(null);
+          setProfileContent("");
+          return;
+        }
 
         const localAccountMap = new Map((((snapshot.accounts as Account[]) || [])).map((account) => [account.id, account]));
         const mappedAccounts = backendAccounts.map((account) =>
