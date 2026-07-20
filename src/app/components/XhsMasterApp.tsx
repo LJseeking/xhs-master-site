@@ -215,12 +215,14 @@ type NoteTask = {
 };
 
 type PromptResult = {
+  openclawTask?: { content: string; title: string };
   prompt: { content: string; title: string };
   imagePrompt?: { content: string; title: string; path: string };
   commands: Array<{ category: string; command: string; description: string; safetyNote: string }>;
 };
 
 type ImagePromptResult = {
+  openclawTask?: { content: string; title: string };
   imagePrompt: { content: string; title: string; path: string };
   referenceStyle: string;
   commands: Array<{ category: string; command: string; description: string; safetyNote: string }>;
@@ -1796,26 +1798,32 @@ export function XhsMasterApp() {
   async function generatePrompt(task: NoteTask) {
     if (!selected || !latestPlan) return;
     setLoading(true);
-    const res = await fetch(`/api/note-tasks/${task.id}/prompt`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ account: selected, noteTask: task, weeklyPlan: latestPlan })
-    });
-    const data = await res.json();
-    setPromptResults((current) => ({ ...current, [task.id]: data }));
-    updateSelectedAccount((account) => ({
-      ...account,
-      weeklyPlans: account.weeklyPlans.map((plan) =>
-        plan.id !== latestPlan.id
-          ? plan
-          : {
-              ...plan,
-              noteTasks: plan.noteTasks.map((item) => (item.id === task.id ? { ...item, status: "已生成Prompt" } : item))
-            }
-      )
-    }));
-    setLoading(false);
-    showToast("正文草稿和执行命令已生成。");
+    try {
+      const res = await fetch(`/api/note-tasks/${task.id}/prompt`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account: selected, noteTask: task, weeklyPlan: latestPlan })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "生成图文草稿箱任务失败。");
+      setPromptResults((current) => ({ ...current, [task.id]: data }));
+      updateSelectedAccount((account) => ({
+        ...account,
+        weeklyPlans: account.weeklyPlans.map((plan) =>
+          plan.id !== latestPlan.id
+            ? plan
+            : {
+                ...plan,
+                noteTasks: plan.noteTasks.map((item) => (item.id === task.id ? { ...item, status: "已生成草稿箱指令" } : item))
+              }
+        )
+      }));
+      showToast("图文草稿箱任务已生成。");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "生成图文草稿箱任务失败。");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function generateImagePrompt(task: NoteTask, options?: SingleImagePromptOptions) {
@@ -3255,6 +3263,7 @@ function ImagesPanel(props: {
   {
     const batchCommand = batchImagePostResult?.commands?.[0];
     const activeSingleCommand = result?.commands?.[0];
+    const singleTaskContent = result?.openclawTask?.content || result?.imagePrompt?.content || "";
     const accountKindLabel = isWedding ? "婚礼已上传图片" : "已上传素材图片";
     const batchTitle = isWedding ? "用婚礼远程图片自动生成批量帖子" : "用远程图片自动生成批量帖子";
     const batchDescription = isWedding
@@ -3439,12 +3448,16 @@ function ImagesPanel(props: {
                       tags: "单篇精修上传",
                       suitableTypes: note.topicTitle
                     });
-                    const uploadedUrls = (uploadData.assets || [])
-                      .map((asset) => asset.fileUrl)
-                      .filter(Boolean)
-                      .join("\n");
-                    imagePaths = [imagePaths, uploadedUrls].filter(Boolean).join("\n");
+                    const uploadedUrls = (uploadData.assets || []).map((asset) => String(asset.fileUrl || "").trim());
+                    if (!uploadedUrls.length || uploadedUrls.some((url) => !/^https?:\/\//i.test(url))) {
+                      throw new Error("上传成功，但后端未返回 OpenClaw 可访问的完整图片 URL。");
+                    }
+                    imagePaths = [imagePaths, uploadedUrls.join("\n")].filter(Boolean).join("\n");
                     onAssetsAdded(uploadData.assets || []);
+                  }
+                  const imageUrls = imagePaths.split("\n").map((url) => url.trim()).filter(Boolean);
+                  if (singleSourceMode === "remote_images" && (!imageUrls.length || imageUrls.some((url) => !/^https?:\/\//i.test(url)))) {
+                    throw new Error("请选择或上传至少一张具有完整 HTTP(S) URL 的图片。");
                   }
                   await generateImagePrompt(note, {
                     imageSourceMode: singleSourceMode,
@@ -3529,21 +3542,26 @@ function ImagesPanel(props: {
                 </div>
                 {singleSourceMode === "remote_images" && (
                   <>
-                    <label className="field">
-                      <span>本篇先上传图片到后端素材库（可选）</span>
+                    <div className="grid gap-1.5 text-sm">
+                      <span className="text-xs font-medium text-ink/60">本篇先上传图片到后端素材库（可选）</span>
+                      <label htmlFor="single-remote-image-files" className="secondary-button w-fit cursor-pointer">
+                        <Upload size={16} />
+                        {singleUploadFiles.length > 0 ? "继续添加图片" : "选择图片"}
+                      </label>
                       <input
-                        name="singleUploadFiles"
+                        id="single-remote-image-files"
                         type="file"
                         accept="image/*"
                         multiple
+                        className="sr-only"
                         onChange={(event) => {
                           const nextFiles = Array.from(event.target.files || []);
                           setSingleUploadFiles((current) => mergeFiles(current, nextFiles));
                           event.currentTarget.value = "";
                         }}
                       />
-                      <span className="text-xs leading-5 text-ink/50">支持一次多选，也可以连续追加。</span>
-                    </label>
+                      <span className="text-xs leading-5 text-ink/50">支持一次多选或连续追加；提交时先上传并保存到当前账号的后端素材库。</span>
+                    </div>
                     {singleUploadFiles.length > 0 && (
                       <div className="rounded border border-teal/20 bg-teal/5 p-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -3587,11 +3605,11 @@ function ImagesPanel(props: {
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div>
                     <h2 className="section-title">单篇任务结果</h2>
-                    <p className="mt-1 text-sm text-ink/60">这里显示当前单篇模式生成的任务和执行命令。</p>
+                    <p className="mt-1 text-sm text-ink/60">可直接复制给 OpenClaw；任务中包含真实 CLI、图片来源和完整执行要求。</p>
                   </div>
                   <div className="flex gap-2">
-                    <IconButton title="复制单篇任务" onClick={() => copy(result?.imagePrompt.content || "")} icon={<Clipboard size={17} />} />
-                    <IconButton title="导出 Markdown" onClick={() => downloadText(`note-${note?.id || "draft"}-image-prompt.md`, result?.imagePrompt.content || "")} icon={<Download size={17} />} />
+                    <IconButton title="复制 OpenClaw 任务" onClick={() => copy(singleTaskContent)} icon={<Clipboard size={17} />} />
+                    <IconButton title="导出 OpenClaw 任务" onClick={() => downloadText(`note-${note?.id || "draft"}-openclaw-image-task.md`, singleTaskContent)} icon={<Download size={17} />} />
                   </div>
                 </div>
                 {activeSingleCommand && (
@@ -3607,7 +3625,7 @@ function ImagesPanel(props: {
                     <div className="mt-2 text-xs text-coral">{activeSingleCommand.safetyNote}</div>
                   </div>
                 )}
-                <textarea className="code-textarea min-h-[620px]" value={result?.imagePrompt.content || "选择单篇来源并点击生成后，这里会显示完整任务。"} readOnly />
+                <textarea className="code-textarea min-h-[620px]" value={singleTaskContent || "选择单篇来源并点击生成后，这里会显示可直接交给 OpenClaw 的完整任务。"} readOnly />
               </div>
             </div>
           </div>
@@ -3943,6 +3961,7 @@ function PromptsPanel(props: {
   const { plan, selectedNoteId, setSelectedNoteId, promptResults, generatePrompt, copy } = props;
   const note = plan?.noteTasks.find((task) => task.id === selectedNoteId) ?? plan?.noteTasks?.[0];
   const result = note ? promptResults[note.id] : null;
+  const openclawTaskContent = result?.openclawTask?.content || result?.prompt.content || "";
   if (!plan || !note) return <div className="panel"><EmptyState text="先生成本周内容，再生成笔记草稿。" /></div>;
   return (
     <div className="grid gap-5 xl:grid-cols-[0.45fr_0.55fr]">
@@ -3957,26 +3976,27 @@ function PromptsPanel(props: {
           ))}
         </div>
         <button type="button" onClick={() => generatePrompt(note)} className="primary-button mt-4">
-          <Wand2 size={17} /> 生成正文草稿
+          <Wand2 size={17} /> 生成图文草稿箱指令
         </button>
+        <p className="mt-3 text-xs leading-5 text-ink/60">请先在“图片方案”中完成当前单篇任务的配图，再把这里生成的完整任务发给 OpenClaw。</p>
       </div>
       <div className="space-y-5">
         <div className="panel">
           <div className="mb-3 flex items-center justify-between">
             <div>
-              <h2 className="section-title">正文草稿</h2>
-              <p className="mt-1 text-sm text-ink/60">发布精简版：短正文、少字段，符合小红书阅读习惯；价格、距离、活动规则等需要人工核验。</p>
+              <h2 className="section-title">OpenClaw 图文草稿箱任务</h2>
+              <p className="mt-1 text-sm text-ink/60">复制完整任务给 OpenClaw：生成标题和正文、使用图片方案成品，并保存到指定账号草稿箱。</p>
             </div>
             <div className="flex gap-2">
-              <IconButton title="复制草稿要求" onClick={() => copy(result?.prompt.content || "")} icon={<Clipboard size={17} />} />
-              <IconButton title="导出 Markdown" onClick={() => downloadText(`note-${note.id}-prompt.md`, result?.prompt.content || "")} icon={<Download size={17} />} />
+              <IconButton title="复制完整任务" onClick={() => copy(openclawTaskContent)} icon={<Clipboard size={17} />} />
+              <IconButton title="导出 Markdown" onClick={() => downloadText(`note-${note.id}-openclaw-draft-task.md`, openclawTaskContent)} icon={<Download size={17} />} />
             </div>
           </div>
-          <textarea className="code-textarea min-h-[420px]" value={result?.prompt.content || "点击生成按钮后显示可复制的正文草稿要求。"} readOnly />
+          <textarea className="code-textarea min-h-[520px]" value={openclawTaskContent || "点击生成按钮后显示可直接发送给 OpenClaw 的图文草稿箱任务。"} readOnly />
         </div>
 
         <div className="panel">
-          <h2 className="section-title">给龙虾的执行命令</h2>
+          <h2 className="section-title">关键执行命令</h2>
           <div className="space-y-3">
             {(result?.commands || []).map((command) => (
               <div key={`${command.category}-${command.command}`} className="rounded border border-ink/10 bg-white p-3">
@@ -3991,7 +4011,7 @@ function PromptsPanel(props: {
                 <div className="mt-2 text-xs text-coral">{command.safetyNote}</div>
               </div>
             ))}
-            {!result?.commands?.length && <div className="text-sm text-ink/60">生成正文草稿后，这里会出现可复制的执行命令。</div>}
+            {!result?.commands?.length && <div className="text-sm text-ink/60">生成图文草稿箱指令后，这里会出现关键执行命令。</div>}
           </div>
         </div>
       </div>

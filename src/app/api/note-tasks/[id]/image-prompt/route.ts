@@ -1,13 +1,90 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { NextResponse } from "next/server";
 import { accountVisualMode, buildCompactImageStyleBrief, buildImagePrompt, buildImageStyleStudy, isWeddingAccount } from "@/lib/imagePrompts";
 import { styleBriefFromStudy } from "@/lib/imageStyleStudy";
-import { slugifyAccountName } from "@/lib/fsPaths";
 import { formatExpertRulesForPrompt } from "@/lib/expertLearning";
 
-function q(value: string) {
-  return JSON.stringify(value);
+function nonEmptyLines(value: string) {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function buildOpenclawTask(input: {
+  account: { name: string; accountParam: string };
+  noteTask: { id: number; topicTitle: string };
+  imageSourceMode: string;
+  openclawImagePaths: string;
+  prompt: string;
+}) {
+  const { account, noteTask, imageSourceMode, openclawImagePaths, prompt } = input;
+  const taskName = `xhs-image-task-${noteTask.id}`;
+  const accountName = shellQuote(account.accountParam);
+  const imageSources = nonEmptyLines(openclawImagePaths);
+  const sourceList = imageSources.length
+    ? imageSources.map((source, index) => `${index + 1}. ${source}`).join("\n")
+    : "未提供；按具体要求确认需要生成的辅助图片。";
+  const usesExistingImages = imageSourceMode !== "ai_generate";
+  const command = usesExistingImages
+    ? `uv run python scripts/cli.py edit-image \\
+  --prompt "$IMAGE_PROMPT" \\
+  --images "$INPUT_IMAGE" \\
+  --output-dir "$ACCOUNT_ASSETS_DIR" \\
+  --size "1024x1536" \\
+  --quality "medium" \\
+  --input-fidelity "high"`
+    : `uv run python scripts/cli.py generate-image \\
+  --prompt "$IMAGE_PROMPT" \\
+  --output-dir "$ACCOUNT_ASSETS_DIR" \\
+  --size "1024x1536"`;
+  const sourceSteps = imageSourceMode === "remote_images"
+    ? `1. 进入已安装的 xiaohongshu_auto_op skill 根目录。
+2. 设置 \`ACCOUNT_NAME=${accountName}\`、\`TASK_DIR="$PWD/.openclaw_tasks/${taskName}"\`、\`ACCOUNT_ASSETS_DIR="$PWD/assets/$ACCOUNT_NAME"\`，然后创建 \`$TASK_DIR/assets\` 和 \`$ACCOUNT_ASSETS_DIR\`。
+3. 下载“指定图片”中的全部 URL 到 \`$TASK_DIR/assets\`，保留原始扩展名，并取得每张图片的本地绝对路径。只允许使用这些指定图片，不得扫描或替换为其他素材。
+4. 阅读下方完整要求，先确定图集顺序以及每张图对应的单张 \`IMAGE_PROMPT\`。每次把当前图片的本地绝对路径设置为 \`INPUT_IMAGE\`，执行一次图片编辑命令；需要多张成品时必须逐张执行。`
+    : `1. 进入已安装的 xiaohongshu_auto_op skill 根目录。
+2. 设置 \`ACCOUNT_NAME=${accountName}\`、\`TASK_DIR="$PWD/.openclaw_tasks/${taskName}"\`、\`ACCOUNT_ASSETS_DIR="$PWD/assets/$ACCOUNT_NAME"\`，然后创建 \`$TASK_DIR\` 和 \`$ACCOUNT_ASSETS_DIR\`。
+3. 阅读下方完整要求，先确定每张辅助图对应的单张 \`IMAGE_PROMPT\`，再逐张执行图片生成命令。`;
+
+  return {
+    title: `${noteTask.topicTitle} OpenClaw 图片执行任务`,
+    command,
+    content: `# OpenClaw 图片执行任务
+
+请使用 **xiaohongshu_auto_op** 的 **xhs-creative** skill 完成本篇配图，不要使用其他图片工具。
+
+## 任务上下文
+- 业务账号：${account.name}
+- 账号参数：${account.accountParam}
+- 单篇任务：${noteTask.topicTitle}
+- 图片来源模式：${imageSourceMode}
+
+注意：\`${account.accountParam}\` 是 xiaohongshu_auto_op 的账号键。\`edit-image\` / \`generate-image\` 不依赖小红书浏览器登录账号，因此不要把它作为 \`--account\` 传给 CLI；但所有成品图必须保存到该账号的 \`assets/${account.accountParam}/\` 素材目录。
+
+## 指定图片
+${sourceList}
+
+## 执行步骤
+${sourceSteps}
+
+## 必须使用的 CLI 命令
+
+\`IMAGE_PROMPT\` 必须替换为当前单张图片对应的编辑/生成提示词；\`INPUT_IMAGE\` 必须替换为 OpenClaw 下载或选择后的本地绝对路径。
+
+\`\`\`bash
+${command}
+\`\`\`
+
+完成后必须确认每张成品图都位于 \`$ACCOUNT_ASSETS_DIR\`，再按图文发布顺序，把这些成品图的本地绝对路径逐行写入 \`$TASK_DIR/image-paths.txt\`。清单中不得写入任务临时目录或其他账号目录中的图片。同时返回每张成品图的 \`local_path\`、对应原图、实际使用的 Prompt 和失败项。不要发布小红书内容。
+
+## 具体要求
+
+${prompt}`
+  };
 }
 
 function commandCopy(account: { accountType: string; name: string; personaBase: string; contentDirections: string; materialCondition: string; businessGoals: string; targetUsers: string }) {
@@ -83,8 +160,7 @@ function commandCopy(account: { accountType: string; name: string; personaBase: 
   return copies[mode];
 }
 
-export async function POST(request: Request, context: { params: { id: string } }) {
-  const id = Number(context.params.id);
+export async function POST(request: Request, _context: { params: { id: string } }) {
   const body = await request.json().catch(() => ({}));
   const openclawImagePaths = String(body.openclawImagePaths || "");
   const imageSourceMode = ["ai_generate", "remote_images"].includes(String(body.imageSourceMode))
@@ -96,6 +172,13 @@ export async function POST(request: Request, context: { params: { id: string } }
   const noteTask = body.noteTask;
   const account = body.account;
   if (!noteTask || !account) return NextResponse.json({ error: "缺少任务上下文" }, { status: 400 });
+  if (!String(account.accountParam || "").trim()) {
+    return NextResponse.json({ error: "当前账号未配置 OpenClaw skill 账号参数，无法确定账号素材目录。" }, { status: 400 });
+  }
+  const remoteImageUrls = nonEmptyLines(openclawImagePaths);
+  if (imageSourceMode === "remote_images" && (!remoteImageUrls.length || remoteImageUrls.some((url) => !/^https?:\/\//i.test(url)))) {
+    return NextResponse.json({ error: "请选择至少一张具有完整 HTTP(S) URL 的后端素材图片。" }, { status: 400 });
+  }
 
   const latestReference = account.referenceResearches?.[0];
   const latestImageStudy = account.imageStyleStudies?.[0];
@@ -103,9 +186,6 @@ export async function POST(request: Request, context: { params: { id: string } }
   const styleBrief = styleBriefFromStudy(latestImageStudy);
   const fallbackBrief = buildCompactImageStyleBrief(account, latestReference);
 
-  const promptDir = path.join(process.cwd(), "prompts", slugifyAccountName(account.name));
-  await fs.mkdir(promptDir, { recursive: true });
-  const imagePromptFile = path.join("prompts", slugifyAccountName(account.name), `note-${noteTask.id}-image.md`);
   const content = buildImagePrompt({
     account,
     noteTask,
@@ -117,44 +197,37 @@ export async function POST(request: Request, context: { params: { id: string } }
     imageCount,
     expertRules: formatExpertRulesForPrompt(account.expertRules || [])
   });
-  await fs.writeFile(path.join(process.cwd(), imagePromptFile), content, "utf8");
-
-  const base = "uv run xiaohongshu_auto_op";
-  const accountFlag = `--account ${q(account.accountParam)}`;
   const copy = commandCopy(account);
-  const commands =
-    imageSourceMode === "ai_generate"
-      ? [
-          {
-            category: "按笔记内容生成 AI 辅助图方案",
-            command: `${base} xhs-content-ops draft-note --prompt-file ${q(imagePromptFile)} ${accountFlag} --safe-mode`,
-            description: "根据这篇笔记内容生成信息卡、结构说明、低拟真辅助画面和必要的图片提示词；不调用真实案例素材。",
-            safetyNote: "AI 辅助图不得伪装成真实案例、真实现场或真实客户反馈；对外图片、标题、正文和图注不标注来源说明。"
-          }
-        ]
-      : imageSourceMode === "remote_images"
-        ? [
-            {
-              category: "用指定图片生成单篇方案",
-              command: `${base} xhs-creative image2 --prompt-file ${q(imagePromptFile)} --output-dir ${q(account.assetsPath)} ${accountFlag}`,
-              description: "按用户指定的远程图片 URL 生成封面、图集顺序、图上文字和必要的 image2 轻处理提示。",
-              safetyNote: copy.safety
-            }
-          ]
-        : [
-            {
-              category: "让龙虾读取远程图片 URL",
-              command: `${base} xhs-content-ops draft-note --prompt-file ${q(imagePromptFile)} ${accountFlag} --safe-mode`,
-              description: "根据这篇笔记内容读取远程图片 URL，自动挑出最匹配主题的图片，并生成图集顺序、正文和风险核验。",
-              safetyNote: copy.safety
-            }
-          ];
+  const openclawTask = buildOpenclawTask({
+    account,
+    noteTask,
+    imageSourceMode,
+    openclawImagePaths,
+    prompt: content
+  });
+  const category = imageSourceMode === "ai_generate"
+    ? "生成 AI 辅助图"
+    : "用远程图片生成单篇配图";
+  const commands = [
+    {
+      category,
+      command: openclawTask.command,
+      description: "由 OpenClaw 在 xiaohongshu_auto_op skill 目录中准备本地图片，并按单张 Prompt 逐次执行真实 CLI。",
+      safetyNote: imageSourceMode === "ai_generate"
+        ? "AI 辅助图不得伪装成真实案例、真实现场或真实客户反馈。"
+        : copy.safety
+    }
+  ];
 
   return NextResponse.json({
+    openclawTask: {
+      title: openclawTask.title,
+      content: openclawTask.content
+    },
     imagePrompt: {
-      title: `${noteTask.topicTitle} 图片 Prompt`,
+      title: `${noteTask.topicTitle} 图片要求`,
       content,
-      path: imagePromptFile
+      path: ""
     },
     referenceStyle: imageStyleStudy,
     commands

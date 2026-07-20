@@ -23,15 +23,15 @@ function baseContext(input: {
 }) {
   const { account, strategySummary, weeklyPlan, noteTask, imagePanelName, expertRules } = input;
   return `## 模式
-只生成草稿，不真实发布，不真实互动。真实账号操作只输出参数建议，必须人工确认。
+生成可直接填写到小红书发布页的标题和正文，但只允许保存到草稿箱，严禁真实发布和互动。
 
 ## 账号参数
 --account ${account.accountParam}
 
 ## 上下文
-- AGENTS.md 路径：${account.profilePath}
-- assets 目录：${account.assetsPath}
-- 图片处理：本 Prompt 只生成正文草稿和图集配文清单；逐张 image2 图片 Prompt 请使用“${imagePanelName}”板块。
+- 账号图片素材目录：assets/${account.accountParam}/
+- 图片任务输出：.openclaw_tasks/xhs-image-task-${noteTask.id}/image-paths.txt
+- 图片处理：先在“${imagePanelName}”完成图片任务；本阶段只读取其成品图片清单，不重新生成或替换图片。
 - 账号定位：${strategySummary}
 - 本周目标：${weeklyPlan.goal}
 
