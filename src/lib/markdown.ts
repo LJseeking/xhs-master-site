@@ -69,7 +69,6 @@ ${assets
 
 - 类型：${asset.fileType}
 - 来源：${asset.sourceType}
-- 授权状态：${asset.authorizationState}
 - 标签：${asset.tags || "未标注"}
 - 适合内容：${asset.suitableTypes || "未标注"}
 - 适合封面：${asset.coverReady ? "是" : "否"}

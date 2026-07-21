@@ -26,29 +26,29 @@ export async function POST(request: Request, context: { params: { id: string } }
     const publishedNoteUrl = String(body.publishedNoteUrl || "");
     const interactionGoal = String(body.interactionGoal || "");
     const commands = buildInteractionCommands(account, resolvedNoteTask, { publishedNoteUrl, interactionGoal });
-    const discoveryPrompt = buildInteractionDiscoveryPrompt({
+    const openclawTask = buildInteractionDiscoveryPrompt({
       account,
       strategy: account.strategy,
       noteTask: resolvedNoteTask,
       publishedNoteUrl,
       interactionGoal
     });
-    const commentPrompt = buildInteractionCommentPrompt({ account, noteTask: resolvedNoteTask, discoveryPrompt });
+    const commentPrompt = buildInteractionCommentPrompt({ account, noteTask: resolvedNoteTask, discoveryPrompt: openclawTask });
     const plan = {
       id: Number(body.planId) || Date.now(),
       accountId: account.id,
       noteTaskId: resolvedNoteTask?.id || null,
       searchKeywords: publishedNoteUrl || buildInteractionKeywords(account, resolvedNoteTask),
       commandJson: JSON.stringify(commands, null, 2),
-      discoveryPrompt,
+      discoveryPrompt: openclawTask,
       commentPrompt,
       rawResults: "",
       targetUsersMarkdown: "",
       commentDraftsMarkdown: "",
-      status: "已生成互动指令"
+      status: "已生成互动执行指令"
     };
 
-    return NextResponse.json({ plan, commands, discoveryPrompt, commentPrompt });
+    return NextResponse.json({ plan, commands, openclawTask, discoveryPrompt: openclawTask, commentPrompt });
   }
 
   if (action === "save-results") {

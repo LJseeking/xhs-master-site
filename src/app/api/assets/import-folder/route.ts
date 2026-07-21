@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     coverReady: Boolean(body.coverReady),
     used: false,
     authorizationState: String(body.authorizationState || "已授权"),
-    riskNotes: String(body.riskNotes || "批量登记导入；图改图前仍需确认素材与真实业务/经历一致。")
+    riskNotes: String(body.riskNotes || "本地文件夹批量登记；图改图前仍需确认素材与真实业务/经历一致。")
   }));
 
   return NextResponse.json({

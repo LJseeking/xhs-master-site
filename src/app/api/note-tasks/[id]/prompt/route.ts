@@ -14,7 +14,6 @@ function buildOpenclawDraftTask(input: {
   const { account, noteTask, prompt } = input;
   const accountName = shellQuote(account.accountParam);
   const accountFlag = `--account ${accountName}`;
-  const taskDir = `$PWD/.openclaw_tasks/xhs-draft-task-${noteTask.id}`;
   const imageTaskDir = `$PWD/.openclaw_tasks/xhs-image-task-${noteTask.id}`;
   const checkLoginCommand = `uv run python scripts/cli.py ${accountFlag} check-login`;
   const fillCommand = `uv run python scripts/cli.py ${accountFlag} fill-publish \\
@@ -22,11 +21,9 @@ function buildOpenclawDraftTask(input: {
   --content-file "$TASK_DIR/content.txt" \\
   --images "\${IMAGE_PATHS[@]}"`;
   const saveCommand = `uv run python scripts/cli.py ${accountFlag} save-draft`;
-  const command = `TASK_DIR="${taskDir}"
-IMAGE_TASK_DIR="${imageTaskDir}"
+  const command = `TASK_DIR="${imageTaskDir}"
 ACCOUNT_NAME=${accountName}
 ACCOUNT_ASSETS_DIR="$PWD/assets/$ACCOUNT_NAME"
-mkdir -p "$TASK_DIR"
 IMAGE_PATHS=()
 while IFS= read -r IMAGE_PATH; do
   [ -n "$IMAGE_PATH" ] || continue
@@ -36,7 +33,7 @@ while IFS= read -r IMAGE_PATH; do
   esac
   [ -f "$IMAGE_PATH" ] || { echo "图片不存在: $IMAGE_PATH" >&2; exit 1; }
   IMAGE_PATHS+=("$IMAGE_PATH")
-done < "$IMAGE_TASK_DIR/image-paths.txt"
+done < "$TASK_DIR/image-paths.txt"
 [ "\${#IMAGE_PATHS[@]}" -gt 0 ] || { echo "图片清单为空" >&2; exit 1; }
 ${checkLoginCommand} && \\
 ${fillCommand} && \\
@@ -65,7 +62,7 @@ ${saveCommand}`;
 
 ## 执行步骤
 1. 进入已安装的 xiaohongshu_auto_op skill 根目录。
-2. 设置 \`TASK_DIR="${taskDir}"\` 并创建该目录。
+2. 复用图片方案阶段已创建的 \`TASK_DIR="${imageTaskDir}"\`，并确认该目录及其中的 \`image-paths.txt\` 已存在；不要再次创建或改用其他任务目录。
 3. 执行登录检查：
 
 \`\`\`bash

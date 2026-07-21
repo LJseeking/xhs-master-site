@@ -4,86 +4,94 @@ type BackendAiResult =
   | { ok: true; text: string; model: string }
   | { ok: false; error: string };
 
-type SubmitCompleteResponse = {
+type BackendAiResponse = {
   status?: boolean;
   message?: string;
-  data?: { uuid?: string; status?: string };
+  data?: {
+    text?: string;
+    model?: string;
+    uuid?: string;
+    status?: string;
+    error?: string;
+  };
 };
 
-type PollCompleteResponse = {
-  status?: boolean;
-  message?: string;
-  data?: { uuid?: string; status?: string; text?: string; model?: string; error?: string };
-};
+const POLL_INTERVAL_MS = 2000;
+const POLL_TIMEOUT_MS = 8 * 60 * 1000;
 
-const AI_POLL_INTERVAL_MS = 30_000;
-const AI_MAX_POLL_ATTEMPTS = 20;
-
-function readAbortMessage(signal?: AbortSignal) {
-  const reason = signal?.reason;
+function abortMessage(signal?: AbortSignal) {
+  if (!signal?.aborted) return "";
+  const reason = signal.reason;
   return reason instanceof Error ? reason.message : typeof reason === "string" ? reason : "AI 请求已取消。";
 }
 
-async function pollResult(uuid: string, signal?: AbortSignal): Promise<BackendAiResult | { ok: false; retry: true }> {
-  const response = await fetch(`${getBackendApiBaseUrl()}/ai/v1/complete/result?uuid=${encodeURIComponent(uuid)}`, {
-    method: "GET",
-    headers: {
-      "xhs-language": "zh-cn"
-    },
-    signal
-  });
-
-  const json = (await response.json().catch(() => ({}))) as PollCompleteResponse;
-  const result = json.data;
-
-  if (!response.ok || !json.status || !result?.status) {
-    return { ok: false, error: json.message || "AI 结果查询失败。" };
-  }
-
-  if (result.status === "pending") {
-    return { ok: false, retry: true };
-  }
-
-  if (result.status === "failed") {
-    return { ok: false, error: result.error || json.message || "AI 调用失败。" };
-  }
-
-  if (result.status !== "completed" || !result.text) {
-    return { ok: false, error: "AI 返回结果不完整。" };
-  }
-
-  return {
-    ok: true,
-    text: result.text,
-    model: result.model || ""
-  };
-}
-
-async function waitForNextPoll(ms: number, signal?: AbortSignal) {
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      resolve();
-    }, ms);
-
-    const onAbort = () => {
-      cleanup();
-      reject(new Error(readAbortMessage(signal)));
-    };
-
-    const cleanup = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-    };
-
-    if (signal?.aborted) {
-      cleanup();
-      reject(new Error(readAbortMessage(signal)));
+function waitForNextPoll(signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    const aborted = abortMessage(signal);
+    if (aborted) {
+      reject(new Error(aborted));
       return;
     }
 
+    const timeoutId = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, POLL_INTERVAL_MS);
+
+    const onAbort = () => {
+      clearTimeout(timeoutId);
+      reject(new Error(abortMessage(signal) || "AI 请求已取消。"));
+    };
+
     signal?.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+async function waitForBackendAiResult(input: {
+  uuid: string;
+  initialModel?: string;
+  signal?: AbortSignal;
+}): Promise<BackendAiResult> {
+  const baseUrl = getBackendApiBaseUrl();
+  const resultUrl = `${baseUrl}/ai/v1/complete/result?uuid=${encodeURIComponent(input.uuid)}`;
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    const aborted = abortMessage(input.signal);
+    if (aborted) return { ok: false, error: aborted };
+
+    const response = await fetch(resultUrl, {
+      method: "GET",
+      headers: { "xhs-language": "zh-cn" },
+      signal: input.signal
+    });
+    const json = (await response.json().catch(() => ({}))) as BackendAiResponse;
+
+    if (!response.ok || json.status === false) {
+      return { ok: false, error: json.message || `后端 AI 结果查询失败（HTTP ${response.status}）。` };
+    }
+
+    const taskStatus = String(json.data?.status || "").toLowerCase();
+    if (json.data?.text && (!taskStatus || ["completed", "succeeded", "success", "done"].includes(taskStatus))) {
+      return {
+        ok: true,
+        text: json.data.text,
+        model: json.data.model || input.initialModel || ""
+      };
+    }
+
+    if (["failed", "error", "cancelled", "canceled"].includes(taskStatus)) {
+      return { ok: false, error: json.data?.error || json.message || `后端 AI 任务执行失败（${taskStatus}）。` };
+    }
+
+    if (taskStatus && !["pending", "queued", "processing", "running"].includes(taskStatus)) {
+      return { ok: false, error: `后端 AI 返回了未知任务状态：${taskStatus}` };
+    }
+
+    await waitForNextPoll(input.signal);
+  }
+
+  return { ok: false, error: "后端 AI 任务等待超时，请稍后重试。" };
 }
 
 export async function completeWithBackendAi(input: {
@@ -107,27 +115,29 @@ export async function completeWithBackendAi(input: {
       signal: input.signal
     });
 
-    const json = (await response.json().catch(() => ({}))) as SubmitCompleteResponse;
-    const uuid = json.data?.uuid?.trim();
+    const json = (await response.json().catch(() => ({}))) as BackendAiResponse;
 
-    if (!response.ok || !json.status || !uuid) {
-      return { ok: false, error: json.message || "AI 任务提交失败。" };
+    if (!response.ok || json.status === false) {
+      return { ok: false, error: json.message || `后端 AI 接口调用失败（HTTP ${response.status}）。` };
     }
 
-    for (let attempt = 0; attempt < AI_MAX_POLL_ATTEMPTS; attempt += 1) {
-      await waitForNextPoll(AI_POLL_INTERVAL_MS, input.signal);
-      const polled = await pollResult(uuid, input.signal);
-      if (polled.ok) return polled;
-      if ("retry" in polled) {
-        if (attempt === AI_MAX_POLL_ATTEMPTS - 1) {
-          return { ok: false, error: "AI 处理超时，请稍后重试。" };
-        }
-        continue;
-      }
-      return polled;
+    if (json.data?.text) {
+      return {
+        ok: true,
+        text: json.data.text,
+        model: json.data.model || input.model || ""
+      };
     }
 
-    return { ok: false, error: "AI 处理超时，请稍后重试。" };
+    if (json.data?.uuid) {
+      return await waitForBackendAiResult({
+        uuid: json.data.uuid,
+        initialModel: json.data.model || input.model,
+        signal: input.signal
+      });
+    }
+
+    return { ok: false, error: json.message || "后端 AI 接口返回结果不完整。" };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "AI 接口调用失败。" };
   }

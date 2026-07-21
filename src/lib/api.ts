@@ -78,7 +78,7 @@ export interface BackendAsset {
   suitableTypes: string;
   coverReady: boolean;
   used: boolean;
-  authorizationState: string;
+  authorizationState?: string;
   riskNotes: string;
   width?: number;
   height?: number;
@@ -343,7 +343,10 @@ export async function updateBackendAccount(body: Record<string, unknown>) {
 export async function saveBackendAssets(accountId: number, assets: BackendAsset[]) {
   const res = await authRequest<{ assets: BackendAsset[] }>("/account/v1/saveAssets", {
     method: "POST",
-    body: { accountId, assets }
+    body: {
+      accountId,
+      assets: assets.map((asset) => ({ ...asset, authorizationState: asset.authorizationState || "" }))
+    }
   });
   if (!res.status) {
     throw new Error(res.message || "保存素材失败");

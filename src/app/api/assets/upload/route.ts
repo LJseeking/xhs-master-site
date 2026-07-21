@@ -160,7 +160,6 @@ export async function POST(request: Request) {
         suitableTypes: String(form.get("suitableTypes") || ""),
         coverReady: form.get("coverReady") === "true",
         used: false,
-        authorizationState: String(form.get("authorizationState") || "待确认"),
         riskNotes: String(form.get("riskNotes") || "")
       };
       assets.push(asset);

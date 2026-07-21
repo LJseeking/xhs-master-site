@@ -248,7 +248,7 @@ export function buildNoteTasks(
       coreView: config.coreView(subject),
       bodyStructure: config.bodyStructure,
       requiredImages: config.requiredImages,
-      recommendedAssets: input.availableAssets || availableAssetNames || "从本账号 assets 目录中选择授权状态明确、标签匹配的真实素材。",
+      recommendedAssets: input.availableAssets || availableAssetNames || "从本账号 assets 目录中选择标签匹配的真实素材。",
       coverCopyDirection: config.coverCopyDirection(subject),
       commentHook: config.commentHook(targetUser),
       expectedGoal: config.expectedGoal,
