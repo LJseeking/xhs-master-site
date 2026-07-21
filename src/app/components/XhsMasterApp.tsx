@@ -4463,14 +4463,20 @@ function InteractionsPanel(props: {
     loading,
     loadingAction
   } = props;
-  if (!selected) return <EmptyState />;
-
   const note = latestPlan?.noteTasks.find((task) => task.id === selectedNoteId) ?? latestPlan?.noteTasks?.[0];
-  const latest = draft.plan || selected.interactionPlans?.[0];
-  const taskPrompt = draft.discoveryPrompt || latest?.discoveryPrompt || "";
   const defaultGoal = note
     ? `围绕「${note.topicTitle}」寻找有相关真实需求的普通用户笔记，以具体赞美和轻微种草为主进行自然评论互动。`
     : "寻找可能对账号内容感兴趣的普通用户笔记，以具体赞美和轻微种草为主进行自然评论互动。";
+  const [interactionGoal, setInteractionGoal] = useState(defaultGoal);
+
+  useEffect(() => {
+    setInteractionGoal(defaultGoal);
+  }, [note?.id, defaultGoal]);
+
+  if (!selected) return <EmptyState />;
+
+  const latest = draft.plan || selected.interactionPlans?.[0];
+  const taskPrompt = draft.discoveryPrompt || latest?.discoveryPrompt || "";
 
   return (
     <div className="space-y-5">
@@ -4482,7 +4488,7 @@ function InteractionsPanel(props: {
               根据当篇笔记和互动目标生成完整执行任务。OpenClaw 将负责选词、搜索、过滤普通用户、生成评论并累计完成 10 篇有效互动。
             </p>
           </div>
-          <div className="rounded bg-coral/10 px-3 py-2 text-sm font-medium text-coral">实际评论前由 OpenClaw 集中请求确认</div>
+          <div className="rounded bg-coral/10 px-3 py-2 text-sm font-medium text-coral">评论由 OpenClaw 直接执行，触发风控立即停止</div>
         </div>
 
         <div className="grid gap-3 md:grid-cols-3">
@@ -4537,7 +4543,7 @@ function InteractionsPanel(props: {
               )}
 
               <Input name="publishedNoteUrl" label="已发布笔记 URL" defaultValue={latest?.searchKeywords || ""} placeholder="粘贴小红书已发布笔记链接" />
-              <Textarea name="interactionGoal" label="互动目标" defaultValue={defaultGoal} />
+              <Textarea name="interactionGoal" label="互动目标" value={interactionGoal} onChange={setInteractionGoal} />
 
               <button type="submit" disabled={loading} aria-busy={loadingAction === "prepareInteractionPlan"} className="primary-button">
                 <ActionButtonContent
@@ -4547,7 +4553,7 @@ function InteractionsPanel(props: {
                   loadingText="正在生成互动执行指令..."
                 />
               </button>
-              <p className="text-xs text-ink/55">任务以成功评论 10 篇为完成标准，最多尝试 25 篇；遇到风控会提前停止。</p>
+              <p className="text-xs text-ink/55">先汇总 20 篇候选，再依次评论；成功 10 篇、候选池处理完或触发风控时停止。</p>
             </div>
           </form>
         </div>
@@ -4557,7 +4563,7 @@ function InteractionsPanel(props: {
             <div className="mb-3 flex items-center justify-between">
               <div>
                 <h2 className="section-title">给 OpenClaw 的互动执行任务</h2>
-                <p className="mt-1 text-sm text-ink/60">包含真实 CLI、普通用户筛选、评论规则、补充候选和成功计数要求。</p>
+                <p className="mt-1 text-sm text-ink/60">包含真实 CLI、主/子会话分工、20 篇候选池、普通用户筛选和成功计数要求。</p>
               </div>
               <div className="flex gap-2">
                 <IconButton title="复制互动任务" onClick={() => copy(taskPrompt)} icon={<Clipboard size={17} />} />
