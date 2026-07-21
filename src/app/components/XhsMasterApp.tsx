@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import Image from "next/image";
 import {
   Activity,
+  ArrowDown,
+  ArrowUp,
   BookOpen,
   CalendarDays,
   Clipboard,
@@ -176,7 +178,6 @@ type Asset = {
   suitableTypes: string;
   coverReady: boolean;
   used: boolean;
-  authorizationState: string;
   riskNotes: string;
   width?: number;
   height?: number;
@@ -239,10 +240,12 @@ type BatchImagePostsResult = {
   commands: Array<{ category: string; command: string; description: string; safetyNote: string }>;
 };
 
-type SingleImageSourceMode = "ai_generate" | "remote_images";
+type SingleImageSourceMode = "ai_auto_select" | "remote_images" | "ai_generate";
 
 type SingleImagePromptOptions = {
   openclawImagePaths?: string;
+  selectedAssets?: Asset[];
+  candidateAssets?: Asset[];
   imageSourceMode?: SingleImageSourceMode;
   noteContent?: string;
   singleGoal?: string;
@@ -290,8 +293,6 @@ const sourceTypes = [
   "AI 图生图",
   "网络参考"
 ];
-const authStates = ["待确认", "已授权", "可商用", "仅内部参考", "禁止发布"];
-
 function accountUiMode(accountType?: string) {
   if (["hiking_diary", "outdoor_travel", "mountain_route", "city_walk_nature", "overseas_hiking"].includes(accountType || "")) return "outdoor";
   if (["restaurant", "cafe_bakery", "hotpot_bbq_latenight", "bar_lightmeal"].includes(accountType || "")) return "food";
@@ -373,14 +374,25 @@ function mergeFiles(current: File[], incoming: File[]) {
   return merged;
 }
 
+function isRemoteImageAsset(asset: Asset) {
+  if (!asset.fileUrl) return false;
+  const type = (asset.fileType || "").toLowerCase();
+  return type === "image"
+    || type.startsWith("image/")
+    || /\.(?:avif|gif|jpe?g|png|webp)(?:$|\?)/i.test(asset.fileUrl);
+}
+
 function RemoteAssetPicker(props: {
   assets: Asset[];
   pickerLabel: string;
   pickerHelp: string;
+  orderable?: boolean;
 }) {
+  const pickerId = useId().replace(/:/g, "");
   const [hoverPreview, setHoverPreview] = useState<{ asset: Asset; left: number; top: number } | null>(null);
   const [pinnedPreview, setPinnedPreview] = useState<Asset | null>(null);
   const [failedUrls, setFailedUrls] = useState<Set<string>>(() => new Set());
+  const [selectedUrls, setSelectedUrls] = useState<string[]>([]);
   useEffect(() => {
     if (!pinnedPreview) return;
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -389,11 +401,16 @@ function RemoteAssetPicker(props: {
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [pinnedPreview]);
-  const remoteAssets = props.assets.filter((asset) => {
-    if (!asset.fileUrl) return false;
-    const type = (asset.fileType || "").toLowerCase();
-    return type === "image" || type.startsWith("image/") || /\.(?:avif|gif|jpe?g|png|webp)(?:$|\?)/i.test(asset.fileUrl);
-  });
+  const remoteAssets = props.assets.filter(isRemoteImageAsset);
+  const availableUrlKey = remoteAssets.map((asset) => asset.fileUrl).join("\n");
+  const orderedAssets = selectedUrls
+    .map((url) => remoteAssets.find((asset) => asset.fileUrl === url))
+    .filter((asset): asset is Asset => Boolean(asset));
+
+  useEffect(() => {
+    const availableUrls = new Set(availableUrlKey.split("\n").filter(Boolean));
+    setSelectedUrls((current) => current.filter((url) => availableUrls.has(url)));
+  }, [availableUrlKey]);
 
   function showHoverPreview(event: React.MouseEvent, asset: Asset) {
     const previewSize = 320;
@@ -417,21 +434,46 @@ function RemoteAssetPicker(props: {
     return asset.tags?.trim() || asset.filePath || "素材库图片";
   }
 
+  function toggleOrderedAsset(url: string, checked: boolean) {
+    setSelectedUrls((current) => checked
+      ? current.includes(url) ? current : [...current, url]
+      : current.filter((item) => item !== url));
+  }
+
+  function moveOrderedAsset(index: number, offset: -1 | 1) {
+    setSelectedUrls((current) => {
+      const targetIndex = index + offset;
+      if (targetIndex < 0 || targetIndex >= current.length) return current;
+      const next = [...current];
+      [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+      return next;
+    });
+  }
+
   return (
-    <div className="space-y-3 rounded border border-ink/10 bg-white p-3">
+    <div className="min-w-0 max-w-full space-y-3 overflow-hidden rounded border border-ink/10 bg-white p-3">
       <div>
         <div className="text-sm font-medium">{props.pickerLabel}</div>
         <div className="mt-1 text-xs leading-5 text-ink/55">{props.pickerHelp}</div>
       </div>
       {remoteAssets.length ? (
-        <div className="grid max-h-56 gap-2 overflow-auto rounded border border-ink/10 bg-ink/5 p-2">
+        <div className="grid max-h-56 min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-2 overflow-x-hidden overflow-y-auto rounded border border-ink/10 bg-ink/5 p-2">
           {remoteAssets.map((asset) => {
             const url = asset.fileUrl || "";
             const failed = failedUrls.has(url);
-            const checkboxId = `asset-picker-${asset.id}-${url.slice(-12).replace(/[^a-z0-9]/gi, "")}`;
+            const selectedIndex = selectedUrls.indexOf(url);
+            const checkboxId = `${pickerId}-asset-${asset.id}-${url.slice(-12).replace(/[^a-z0-9]/gi, "")}`;
             return (
-              <div key={`${asset.id}-${url}`} className="flex items-center gap-2 rounded border border-transparent bg-white p-2 transition has-[:checked]:border-teal/40 has-[:checked]:bg-teal/5">
-                <input id={checkboxId} name="selectedAssetUrls" type="checkbox" value={url} className="shrink-0" />
+              <div key={`${asset.id}-${url}`} className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden rounded border border-transparent bg-white p-2 transition has-[:checked]:border-teal/40 has-[:checked]:bg-teal/5">
+                <input
+                  id={checkboxId}
+                  name={props.orderable ? undefined : "selectedAssetUrls"}
+                  type="checkbox"
+                  value={url}
+                  checked={props.orderable ? selectedIndex >= 0 : undefined}
+                  onChange={props.orderable ? (event) => toggleOrderedAsset(url, event.target.checked) : undefined}
+                  className="shrink-0"
+                />
                 <label htmlFor={checkboxId} className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
                   <span
                     className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded border border-ink/10 bg-ink/5"
@@ -476,6 +518,63 @@ function RemoteAssetPicker(props: {
       ) : (
         <div className="rounded border border-dashed border-ink/15 bg-ink/5 px-3 py-4 text-sm text-ink/55">
           当前账号还没有可选素材，请先上传图片。
+        </div>
+      )}
+
+      {props.orderable && orderedAssets.length > 0 && (
+        <div className="min-w-0 overflow-hidden rounded border border-teal/25 bg-teal/5">
+          <div className="flex items-center justify-between gap-3 border-b border-teal/15 px-3 py-2">
+            <div>
+              <div className="text-sm font-medium text-teal">已选图片顺序</div>
+              <div className="mt-0.5 text-xs text-ink/55">第一张作为封面；使用箭头调整最终图集顺序。</div>
+            </div>
+            <div className="shrink-0 text-xs text-ink/55">共 {orderedAssets.length} 张</div>
+          </div>
+          <div className="max-h-64 overflow-y-auto bg-white">
+            {orderedAssets.map((asset, index) => {
+              const url = asset.fileUrl || "";
+              const failed = failedUrls.has(url);
+              return (
+                <div key={`ordered-${asset.id}-${url}`} className="flex min-w-0 items-center gap-3 border-b border-ink/10 px-3 py-2 last:border-b-0">
+                  <div className="flex w-6 shrink-0 justify-center text-sm font-semibold text-ink/70">{index + 1}</div>
+                  <button
+                    type="button"
+                    title="查看大图"
+                    aria-label={`查看第 ${index + 1} 张大图：${assetLabel(asset)}`}
+                    onClick={() => setPinnedPreview(asset)}
+                    disabled={failed}
+                    className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded border border-ink/10 bg-ink/5"
+                  >
+                    {failed ? (
+                      <ImageOff size={18} className="text-ink/35" />
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={url} alt={assetLabel(asset)} className="h-full w-full object-cover" onError={() => markImageFailed(url)} />
+                    )}
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <div className="truncate text-sm font-medium">{asset.tags?.trim() || asset.filePath}</div>
+                      {index === 0 && <span className="shrink-0 text-xs font-medium text-teal">封面</span>}
+                    </div>
+                    <div className="mt-0.5 truncate text-xs text-ink/50">{asset.filePath}</div>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <button type="button" title="上移" aria-label={`上移第 ${index + 1} 张图片`} disabled={index === 0} onClick={() => moveOrderedAsset(index, -1)} className="icon-button">
+                      <ArrowUp size={15} />
+                    </button>
+                    <button type="button" title="下移" aria-label={`下移第 ${index + 1} 张图片`} disabled={index === orderedAssets.length - 1} onClick={() => moveOrderedAsset(index, 1)} className="icon-button">
+                      <ArrowDown size={15} />
+                    </button>
+                    <button type="button" title="移出" aria-label={`移出第 ${index + 1} 张图片`} onClick={() => toggleOrderedAsset(url, false)} className="icon-button">
+                      <X size={15} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {selectedUrls.map((url) => <input key={`ordered-input-${url}`} type="hidden" name="selectedAssetUrls" value={url} />)}
         </div>
       )}
 
@@ -1112,7 +1211,6 @@ function mapBackendAccountToUiAccount(account: BackendAccountDetail): Account {
     suitableTypes: asset.suitableTypes || "",
     coverReady: Boolean(asset.coverReady),
     used: Boolean(asset.used),
-    authorizationState: asset.authorizationState || "",
     riskNotes: asset.riskNotes || "",
     width: asset.width || 0,
     height: asset.height || 0,
@@ -1220,7 +1318,6 @@ function toBackendAsset(asset: Asset): BackendAsset {
     suitableTypes: asset.suitableTypes || "",
     coverReady: Boolean(asset.coverReady),
     used: Boolean(asset.used),
-    authorizationState: asset.authorizationState || "",
     riskNotes: asset.riskNotes || "",
     width: asset.width || 0,
     height: asset.height || 0,
@@ -1561,7 +1658,6 @@ export function XhsMasterApp() {
       const tags = String(formData.get("tags") || "");
       const suitableTypes = String(formData.get("suitableTypes") || "");
       const coverReady = formData.get("coverReady") === "true";
-      const authorizationState = String(formData.get("authorizationState") || "待确认");
       const riskNotes = String(formData.get("riskNotes") || "");
 
       let uploadedAssets: Asset[] = [];
@@ -1575,7 +1671,6 @@ export function XhsMasterApp() {
         const uploadForm = new FormData();
         uploadForm.set("accountId", String(selected.id));
         uploadForm.set("sourceType", sourceType);
-        uploadForm.set("authorizationState", authorizationState);
         uploadForm.set("tags", tags);
         uploadForm.set("suitableTypes", suitableTypes);
         uploadForm.set("riskNotes", riskNotes);
@@ -1606,7 +1701,6 @@ export function XhsMasterApp() {
           tags: asset.tags || tags,
           suitableTypes: asset.suitableTypes || suitableTypes,
           coverReady: typeof asset.coverReady === "boolean" ? asset.coverReady : coverReady,
-          authorizationState: asset.authorizationState || authorizationState,
           riskNotes: asset.riskNotes || riskNotes
         }))
       ];
@@ -1623,7 +1717,6 @@ export function XhsMasterApp() {
         suitableTypes: asset.suitableTypes || "",
         coverReady: Boolean(asset.coverReady),
         used: Boolean(asset.used),
-        authorizationState: asset.authorizationState || "",
         riskNotes: asset.riskNotes || "",
         width: asset.width || 0,
         height: asset.height || 0,
@@ -1892,14 +1985,14 @@ export function XhsMasterApp() {
       setInteractionDraft({
         plan: data.plan,
         commands: data.commands,
-        discoveryPrompt: data.discoveryPrompt,
+        discoveryPrompt: data.openclawTask || data.discoveryPrompt,
         commentPrompt: data.commentPrompt
       });
       updateSelectedAccount((account) => ({
         ...account,
         interactionPlans: [data.plan, ...(account.interactionPlans || []).filter((item) => item.id !== data.plan.id)]
       }));
-      showToast("已发布笔记互动建议已生成。");
+      showToast("OpenClaw 互动执行指令已生成。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "生成目标用户互动研究包失败。");
     } finally {
@@ -2978,8 +3071,6 @@ function AssetsPanel(props: {
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   if (!selected) return <EmptyState />;
   const copyText = assetUiCopy(selected.accountType);
-  const authorizedCount = selected.assets.filter((asset) => ["已授权", "可商用"].includes(asset.authorizationState)).length;
-  const pendingCount = selected.assets.filter((asset) => asset.authorizationState === "待确认").length;
   return (
     <div className="space-y-5">
       <div className="panel">
@@ -2994,16 +3085,11 @@ function AssetsPanel(props: {
             <FileText size={17} /> 生成素材清单
           </button>
         </div>
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-2">
             <div className="rounded border border-ink/10 bg-white p-3">
               <div className="text-xs font-medium text-ink/55">已登记素材</div>
               <div className="mt-2 text-2xl font-semibold">{selected.assets.length}</div>
             <p className="mt-1 text-sm text-ink/60">账号级长期素材，会被批量生成和单篇精修的素材库多图选择优先参考。</p>
-          </div>
-          <div className="rounded border border-ink/10 bg-white p-3">
-            <div className="text-xs font-medium text-ink/55">授权状态</div>
-            <div className="mt-2 text-sm font-semibold">可用 {authorizedCount} / 待确认 {pendingCount}</div>
-            <p className="mt-1 text-sm text-ink/60">未确认肖像、价格、地点、路线、档期或资质时，生成内容必须保留核验提示。</p>
           </div>
           <div className="rounded border border-ink/10 bg-white p-3">
             <div className="text-xs font-medium text-ink/55">可预览素材</div>
@@ -3070,14 +3156,6 @@ function AssetsPanel(props: {
               </div>
             </div>
           )}
-          <label className="field">
-            <span>授权状态</span>
-            <select name="authorizationState" defaultValue="待确认">
-              {authStates.map((state) => (
-                <option key={state}>{state}</option>
-              ))}
-            </select>
-          </label>
           <label className="flex items-center gap-2 rounded border border-ink/10 bg-white px-3 py-2 text-sm">
             <input name="coverReady" type="checkbox" value="true" /> 适合封面
           </label>
@@ -3106,7 +3184,7 @@ function AssetsPanel(props: {
         <div className="mb-4">
           <div>
             <h2 className="section-title">已登记素材</h2>
-            <p className="mt-1 text-sm text-ink/60">生成素材清单后，系统会知道素材来源、授权状态、适合内容、封面可用性和风险备注。</p>
+            <p className="mt-1 text-sm text-ink/60">生成素材清单后，系统会知道素材来源、适合内容、封面可用性和风险备注。</p>
           </div>
         </div>
         {!selected.assets.length ? (
@@ -3145,7 +3223,7 @@ function AssetsPanel(props: {
                       <span>{asset.fileUrl}</span>
                     </a>
                   )}
-                  <div className="text-ink/60">{asset.sourceType} / {asset.authorizationState}</div>
+                  <div className="text-ink/60">{asset.sourceType}</div>
                   <div>{asset.tags || "未标注标签"}</div>
                   <div className="flex gap-2 text-xs">
                     <span className={clsx("rounded px-2 py-1", asset.coverReady ? "bg-teal/10 text-teal" : "bg-ink/5")}>封面 {asset.coverReady ? "是" : "否"}</span>
@@ -3448,7 +3526,7 @@ function ImagesPanel(props: {
   const commandList = [...(batchImagePostResult?.commands || []), ...(result?.commands || [])];
   const [weddingPlanningGoal, setWeddingPlanningGoal] = useState(weddingPlanningGoalPresets[0].value);
   const [imageWorkflowMode, setImageWorkflowMode] = useState<"batch" | "single">("batch");
-  const [singleSourceMode, setSingleSourceMode] = useState<SingleImageSourceMode>("remote_images");
+  const [singleSourceMode, setSingleSourceMode] = useState<SingleImageSourceMode>("ai_auto_select");
   const [singleImageGoal, setSingleImageGoal] = useState("围绕这篇笔记内容，生成封面、图集顺序、图上文字、正文结构和风险核验。");
   const [singleImageCount, setSingleImageCount] = useState("5");
   const [batchUploadFiles, setBatchUploadFiles] = useState<File[]>([]);
@@ -3465,7 +3543,6 @@ function ImagesPanel(props: {
     const uploadForm = new FormData();
     uploadForm.set("accountId", String(selected?.id || ""));
     uploadForm.set("sourceType", "真实素材");
-    uploadForm.set("authorizationState", "待确认");
     uploadForm.set("tags", options?.tags || "");
     uploadForm.set("suitableTypes", options?.suitableTypes || "");
     for (const file of files) uploadForm.append("files", file);
@@ -3503,7 +3580,6 @@ function ImagesPanel(props: {
         suitableTypes: asset.suitableTypes || "",
         coverReady: Boolean(asset.coverReady),
         used: Boolean(asset.used),
-        authorizationState: asset.authorizationState || "",
         riskNotes: asset.riskNotes || "",
         width: asset.width || 0,
         height: asset.height || 0,
@@ -3515,7 +3591,6 @@ function ImagesPanel(props: {
 
   {
     const batchCommand = batchImagePostResult?.commands?.[0];
-    const activeSingleCommand = result?.commands?.[0];
     const singleTaskContent = result?.openclawTask?.content || result?.imagePrompt?.content || "";
     const accountKindLabel = isWedding ? "婚礼已上传图片" : "已上传素材图片";
     const batchTitle = isWedding ? "用婚礼素材库图片自动生成批量帖子" : "用素材库图片自动生成批量帖子";
@@ -3551,9 +3626,9 @@ function ImagesPanel(props: {
         </div>
 
         {imageWorkflowMode === "batch" ? (
-          <div className="grid gap-5 xl:grid-cols-[0.42fr_0.58fr]">
+          <div className="grid w-full min-w-0 gap-5 xl:grid-cols-[minmax(0,42fr)_minmax(0,58fr)]">
             <form
-              className="panel border-teal/30"
+              className="panel min-w-0 overflow-hidden border-teal/30"
               onSubmit={(event) => {
                 event.preventDefault();
                 if (imageSubmitting) return;
@@ -3591,7 +3666,7 @@ function ImagesPanel(props: {
                 <p className="mt-1 text-sm text-ink/60">{batchDescription}</p>
               </div>
 
-              <div className="grid gap-3 md:grid-cols-[160px_1fr]">
+              <div className="grid min-w-0 gap-3 md:grid-cols-[160px_minmax(0,1fr)]">
                 <label className="field">
                   <span>生成周期</span>
                   <select name="weeks" defaultValue="1">
@@ -3606,7 +3681,7 @@ function ImagesPanel(props: {
                 </div>
               </div>
 
-              <div className="mt-3 grid gap-3">
+              <div className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
                 <label className="field">
                   <span>本次先上传图片到后端素材库（可选）</span>
                   <input
@@ -3664,7 +3739,7 @@ function ImagesPanel(props: {
               {batchImagePostResult?.planningPrompt.path && <div className="mt-3 rounded bg-teal/10 px-3 py-2 text-xs text-teal">{batchImagePostResult?.planningPrompt.path}</div>}
             </form>
 
-            <div className="panel border-teal/30">
+            <div className="panel min-w-0 overflow-hidden border-teal/30">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                   <h2 className="section-title">批量任务结果</h2>
@@ -3696,9 +3771,9 @@ function ImagesPanel(props: {
             </div>
           </div>
         ) : (
-          <div className="grid gap-5 xl:grid-cols-[0.42fr_0.58fr]">
+          <div className="grid w-full min-w-0 gap-5 xl:grid-cols-[minmax(0,42fr)_minmax(0,58fr)]">
             <form
-              className="panel"
+              className="panel min-w-0 overflow-hidden"
               onSubmit={(event) => {
                 event.preventDefault();
                 if (!note) return;
@@ -3706,8 +3781,15 @@ function ImagesPanel(props: {
                 setImageSubmitting("single");
                 const form = new FormData(event.currentTarget);
                 const run = async () => {
-                  let imagePaths = collectRemoteImageUrls(form).join("\n");
-                  if (singleUploadFiles.length) {
+                  const selectedUrls = collectRemoteImageUrls(form);
+                  let selectedImageAssets = (selected?.assets || []).filter((asset) => asset.fileUrl && selectedUrls.includes(asset.fileUrl));
+                  let imagePaths = selectedUrls.join("\n");
+                  const candidateAssets = (selected?.assets || []).filter(isRemoteImageAsset);
+                  const requestedImageCount = Math.max(1, Math.min(Number.parseInt(String(form.get("imageCount") || "5"), 10) || 5, 9));
+                  if (singleSourceMode === "ai_auto_select" && candidateAssets.length < requestedImageCount) {
+                    throw new Error(`当前素材库只有 ${candidateAssets.length} 张可用图片，无法自动选择 ${requestedImageCount} 张。请补充素材或减少图片数量。`);
+                  }
+                  if (singleSourceMode === "remote_images" && singleUploadFiles.length) {
                     const uploadData = await uploadFilesWithAuth(singleUploadFiles, {
                       tags: "单篇精修上传",
                       suitableTypes: note.topicTitle
@@ -3717,6 +3799,7 @@ function ImagesPanel(props: {
                       throw new Error("上传成功，但后端未返回 OpenClaw 可访问的完整图片 URL。");
                     }
                     imagePaths = [imagePaths, uploadedUrls.join("\n")].filter(Boolean).join("\n");
+                    selectedImageAssets = [...selectedImageAssets, ...(uploadData.assets || [])];
                     onAssetsAdded(uploadData.assets || []);
                   }
                   const imageUrls = imagePaths.split("\n").map((url) => url.trim()).filter(Boolean);
@@ -3728,9 +3811,22 @@ function ImagesPanel(props: {
                     noteContent: String(form.get("noteContent") || ""),
                     singleGoal: String(form.get("singleGoal") || ""),
                     imageCount: String(form.get("imageCount") || ""),
-                    openclawImagePaths: imagePaths
+                    openclawImagePaths: imagePaths,
+                    candidateAssets: singleSourceMode === "ai_auto_select" ? candidateAssets : undefined,
+                    selectedAssets: imageUrls.map((url, index) => selectedImageAssets.find((asset) => asset.fileUrl === url) || {
+                      id: index + 1,
+                      filePath: url,
+                      fileUrl: url,
+                      fileType: "image",
+                      sourceType: "真实素材",
+                      tags: "",
+                      suitableTypes: "",
+                      coverReady: false,
+                      used: false,
+                      riskNotes: ""
+                    })
                   });
-                  setSingleUploadFiles([]);
+                  if (singleSourceMode === "remote_images") setSingleUploadFiles([]);
                 };
                 run()
                   .catch((error) => window.alert(error instanceof Error ? error.message : "生成单篇图片方案失败。"))
@@ -3758,8 +3854,9 @@ function ImagesPanel(props: {
 
               <div className="mt-4">
                 <div className="mb-2 text-sm font-medium text-ink/70">图片来源</div>
-                <div className="grid gap-2 md:grid-cols-2">
+                <div className="grid gap-2 md:grid-cols-3">
                   {[
+                    ["ai_auto_select", "AI 自动选图", "根据本篇笔记和当前素材标签，自动选择并排序最匹配的图片。"],
                     ["remote_images", "多张素材库图片", "从素材库多选已经上传到后端的图片。"],
                     ["ai_generate", "AI 辅助图", "没有真实图时，只生成信息卡、结构图或低拟真辅助画面。"]
                   ].map(([mode, title, desc]) => (
@@ -3782,30 +3879,31 @@ function ImagesPanel(props: {
                   <div className="mt-2 text-sm leading-6 text-ink/65">
                     <div>封面方向：{note.coverCopyDirection || "未设置"}</div>
                     <div>所需图片：{note.requiredImages || "按选题生成图卡结构"}</div>
-                    <div>推荐素材：{note.recommendedAssets || "暂无，生成素材缺口"}</div>
                   </div>
                 </div>
               )}
 
-              <div className="mt-4 grid gap-3">
+              <div className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
                 <Textarea
                   name="noteContent"
                   label="这篇笔记内容/方向"
                   defaultValue={note ? [note.coreView, note.bodyStructure].filter(Boolean).join("\n") : ""}
                   placeholder="写清楚这一篇要表达什么，例如：围绕婚礼蛋糕细节，拆解为什么它能提升整场婚礼高级感。"
                 />
-                <div className="grid gap-3 md:grid-cols-[120px_1fr]">
-                  <Input name="imageCount" label="图片数量" defaultValue={singleImageCount} onChange={setSingleImageCount} placeholder="5" />
-                  {singleSourceMode === "remote_images" ? (
+                {singleSourceMode === "remote_images" ? (
+                  <div className="rounded border border-ink/10 bg-white p-3 text-sm leading-6 text-ink/60">
+                    用户手动选择本篇需要精修的图片；一张输入素材对应一张精修成品，不自动推荐、增删或替换图片。
+                  </div>
+                ) : (
+                  <div className="grid min-w-0 gap-3 md:grid-cols-[120px_minmax(0,1fr)]">
+                    <Input name="imageCount" label="图片数量" type="number" min={1} max={9} step={1} defaultValue={singleImageCount} onChange={setSingleImageCount} placeholder="5" />
                     <div className="rounded border border-ink/10 bg-white p-3 text-sm leading-6 text-ink/60">
-                      这篇笔记会直接使用你选择的图片。
+                      {singleSourceMode === "ai_auto_select"
+                        ? `AI 只读取素材标签和文字信息，不识别图片画面。当前有 ${(selected?.assets || []).filter(isRemoteImageAsset).length} 张可用图片，其中 ${(selected?.assets || []).filter((asset) => isRemoteImageAsset(asset) && Boolean(asset.tags?.trim())).length} 张已填写标签。`
+                        : "AI 辅助图不作为真实证据图；有真实素材时仍优先使用真实素材。"}
                     </div>
-                  ) : (
-                    <div className="rounded border border-ink/10 bg-white p-3 text-sm leading-6 text-ink/60">
-                      AI 辅助图不作为真实证据图；有真实素材时仍优先使用真实素材。
-                    </div>
-                  )}
-                </div>
+                  </div>
+                )}
                 {singleSourceMode === "remote_images" && (
                   <>
                     <div className="grid gap-1.5 text-sm">
@@ -3846,9 +3944,11 @@ function ImagesPanel(props: {
                       </div>
                     )}
                     <RemoteAssetPicker
+                      key={`single-picker-${note?.id || "none"}`}
                       assets={selected?.assets || []}
                       pickerLabel="这篇要用的素材库图片"
-                      pickerHelp="可以一次多选账号素材库里已经上传的图片。"
+                      pickerHelp="按选择顺序加入图集；选中后可在下方调整顺序，第一张作为封面。"
+                      orderable
                     />
                   </>
                 )}
@@ -3865,14 +3965,22 @@ function ImagesPanel(props: {
                 <ActionButtonContent
                   loading={imageSubmitting === "single" || loadingAction === "generateImagePrompt"}
                   icon={<ImageIcon size={17} />}
-                  idleText={singleSourceMode === "ai_generate" ? "生成 AI 辅助图方案" : "用素材库多图生成单篇方案"}
-                  loadingText={singleSourceMode === "ai_generate" ? "正在生成 AI 辅助图方案..." : "正在生成单篇方案..."}
+                  idleText={singleSourceMode === "ai_auto_select"
+                    ? "AI 自动选图并生成单篇方案"
+                    : singleSourceMode === "ai_generate"
+                    ? "生成 AI 辅助图方案"
+                    : "用素材库多图生成单篇方案"}
+                  loadingText={singleSourceMode === "ai_auto_select"
+                    ? "正在自动选图并生成单篇方案..."
+                    : singleSourceMode === "ai_generate"
+                    ? "正在生成 AI 辅助图方案..."
+                    : "正在生成单篇方案..."}
                 />
               </button>
             </form>
 
-            <div className="space-y-5">
-              <div className="panel">
+            <div className="min-w-0 space-y-5">
+              <div className="panel min-w-0 overflow-hidden">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div>
                     <h2 className="section-title">单篇任务结果</h2>
@@ -3883,19 +3991,6 @@ function ImagesPanel(props: {
                     <IconButton title="导出 OpenClaw 任务" onClick={() => downloadText(`note-${note?.id || "draft"}-openclaw-image-task.md`, singleTaskContent)} icon={<Download size={17} />} />
                   </div>
                 </div>
-                {activeSingleCommand && (
-                  <div className="mb-3 rounded border border-ink/10 bg-white p-3">
-                    <div className="mb-2 flex items-center justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-medium">{activeSingleCommand.category}</div>
-                        <div className="text-xs text-ink/60">{activeSingleCommand.description}</div>
-                      </div>
-                      <IconButton title="复制执行命令" onClick={() => copy(activeSingleCommand.command)} icon={<Clipboard size={16} />} />
-                    </div>
-                    <code className="block overflow-auto rounded bg-ink px-3 py-2 text-xs text-white">{activeSingleCommand.command}</code>
-                    <div className="mt-2 text-xs text-coral">{activeSingleCommand.safetyNote}</div>
-                  </div>
-                )}
                 <textarea className="code-textarea min-h-[620px]" value={singleTaskContent || "选择单篇来源并点击生成后，这里会显示可直接交给 OpenClaw 的完整任务。"} readOnly />
               </div>
             </div>
@@ -4019,6 +4114,7 @@ function ImagesPanel(props: {
 
             <div className="mt-3 grid gap-3">
               <RemoteAssetPicker
+                key={`legacy-single-picker-${note?.id || "none"}`}
                 assets={selected?.assets || []}
                 pickerLabel="本次要分析的婚礼素材库图片"
                 pickerHelp="从当前账号婚礼素材里多选；没有素材就先上传图片。"
@@ -4078,7 +4174,7 @@ function ImagesPanel(props: {
             <p className="mt-1 text-sm text-ink/60">
               {isWedding
                 ? "批量规划完成后，如果你已经把某篇选题放进“本周内容”，可以在这里继续生成这篇笔记的逐张图片方案。"
-                : "选择一篇本周内容，系统会根据已上传素材生成每张图怎么选、怎么改、怎么排；素材不足时会先列补拍和补资料清单。"}
+                : "选择一篇本周内容并手动指定素材，系统只规划这些图片怎么改、怎么排，不自动推荐或替换图片。"}
             </p>
           </div>
 
@@ -4103,18 +4199,18 @@ function ImagesPanel(props: {
               <div className="mt-2 text-sm leading-6 text-ink/65">
                 <div>封面方向：{note?.coverCopyDirection || "未设置"}</div>
                 <div>所需图片：{note?.requiredImages || "按选题生成图卡结构"}</div>
-                <div>推荐素材：{note?.recommendedAssets || "暂无，生成素材缺口"}</div>
               </div>
             </div>
           )}
 
           <details className="mt-4 rounded border border-ink/10 bg-white p-3">
-            <summary className="cursor-pointer text-sm font-medium">指定要使用的已上传素材（可选）</summary>
+            <summary className="cursor-pointer text-sm font-medium">指定要精修的已上传素材（必选）</summary>
             <div className="mt-3 grid gap-3">
               <RemoteAssetPicker
                 assets={selected?.assets || []}
                 pickerLabel="这篇要用的已上传素材"
-                pickerHelp="可以从账号素材库多选已经上传的图片。"
+                pickerHelp="按选择顺序加入图集；选中后可在下方调整顺序，第一张作为封面。"
+                orderable
               />
             </div>
           </details>
@@ -4206,7 +4302,7 @@ function ImagesPanel(props: {
           <div className="mb-3 flex items-center justify-between">
             <div>
               <h2 className="section-title">图片方案</h2>
-              <p className="mt-1 text-sm text-ink/60">包含每张图的用途、素材来源、改图要求、文字叠加建议和素材缺口。</p>
+              <p className="mt-1 text-sm text-ink/60">包含每张指定图片的用途、改图要求、文字叠加建议和人工核验项。</p>
             </div>
             <div className="flex gap-2">
               <IconButton title="复制图片方案" onClick={() => copy(result?.imagePrompt.content || "")} icon={<Clipboard size={17} />} />
@@ -4281,25 +4377,6 @@ function PromptsPanel(props: {
           <textarea className="code-textarea min-h-[520px]" value={openclawTaskContent || "点击生成按钮后显示可直接发送给 OpenClaw 的图文草稿箱任务。"} readOnly />
         </div>
 
-        <div className="panel">
-          <h2 className="section-title">关键执行命令</h2>
-          <div className="space-y-3">
-            {(result?.commands || []).map((command) => (
-              <div key={`${command.category}-${command.command}`} className="rounded border border-ink/10 bg-white p-3">
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="font-medium">{command.category}</div>
-                    <div className="text-xs text-ink/60">{command.description}</div>
-                  </div>
-                  <IconButton title="复制命令" onClick={() => copy(command.command)} icon={<Clipboard size={16} />} />
-                </div>
-                <code className="block overflow-auto rounded bg-ink px-3 py-2 text-xs text-white">{command.command}</code>
-                <div className="mt-2 text-xs text-coral">{command.safetyNote}</div>
-              </div>
-            ))}
-            {!result?.commands?.length && <div className="text-sm text-ink/60">生成图文草稿箱指令后，这里会出现关键执行命令。</div>}
-          </div>
-        </div>
       </div>
     </div>
   );
@@ -4338,12 +4415,10 @@ function InteractionsPanel(props: {
 
   const note = latestPlan?.noteTasks.find((task) => task.id === selectedNoteId) ?? latestPlan?.noteTasks?.[0];
   const latest = draft.plan || selected.interactionPlans?.[0];
-  const commands = draft.commands || (latest?.commandJson ? safeJsonArray(latest.commandJson) : []);
   const taskPrompt = draft.discoveryPrompt || latest?.discoveryPrompt || "";
-  const commandBundle = commands.map((command: any) => command.command).join("\n");
   const defaultGoal = note
-    ? `围绕这篇已发布笔记，寻找可能对「${note.topicTitle}」感兴趣的用户，进行自然、有帮助、不打扰的评论互动。`
-    : "围绕这篇已发布笔记，寻找可能对账号内容感兴趣的用户，进行自然、有帮助、不打扰的评论互动。";
+    ? `围绕「${note.topicTitle}」寻找有相关真实需求的普通用户笔记，以具体赞美和轻微种草为主进行自然评论互动。`
+    : "寻找可能对账号内容感兴趣的普通用户笔记，以具体赞美和轻微种草为主进行自然评论互动。";
 
   return (
     <div className="space-y-5">
@@ -4352,10 +4427,10 @@ function InteractionsPanel(props: {
           <div>
             <h2 className="section-title">目标用户互动</h2>
             <p className="mt-1 max-w-3xl text-sm text-ink/60">
-              这里只做轻量调度：告诉 xiaohongshu_auto_op 基于哪篇已发布笔记去互动。搜索谁、怎么判断兴趣、怎么评论，由 skill 自主完成。
+              根据当篇笔记和互动目标生成完整执行任务。OpenClaw 将负责选词、搜索、过滤普通用户、生成评论并累计完成 10 篇有效互动。
             </p>
           </div>
-          <div className="rounded bg-coral/10 px-3 py-2 text-sm font-medium text-coral">本地只生成互动建议，不自动操作账号</div>
+          <div className="rounded bg-coral/10 px-3 py-2 text-sm font-medium text-coral">实际评论前由 OpenClaw 集中请求确认</div>
         </div>
 
         <div className="grid gap-3 md:grid-cols-3">
@@ -4372,15 +4447,15 @@ function InteractionsPanel(props: {
           <div className={clsx("rounded border p-4", taskPrompt ? "border-teal/30 bg-teal/5" : "border-ink/10 bg-white")}>
             <div className="text-xs font-medium text-ink/55">3. 互动指令</div>
             <div className="mt-2 font-semibold">{taskPrompt ? "已生成" : "待生成"}</div>
-            <p className="mt-2 text-sm text-ink/60">复制给 skill 或按命令建议人工执行。</p>
+            <p className="mt-2 text-sm text-ink/60">复制整份任务给 OpenClaw 执行。</p>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[0.42fr_0.58fr]">
-        <div className="space-y-5">
+      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        <div className="min-w-0 space-y-5">
           <form
-            className="panel"
+            className="panel min-w-0"
             onSubmit={(event) => {
               event.preventDefault();
               const form = new FormData(event.currentTarget);
@@ -4390,8 +4465,8 @@ function InteractionsPanel(props: {
               });
             }}
           >
-            <h2 className="section-title">生成互动任务</h2>
-            <p className="mt-1 text-sm text-ink/60">选择本周内容，粘贴对应的已发布小红书笔记链接。</p>
+            <h2 className="section-title">生成互动执行任务</h2>
+            <p className="mt-1 text-sm text-ink/60">选择本周内容并填写互动目标；已发布链接用于记录和核对，可不填。</p>
 
             <div className="mt-4 space-y-3">
               {!latestPlan?.noteTasks?.length ? (
@@ -4416,57 +4491,28 @@ function InteractionsPanel(props: {
                 <ActionButtonContent
                   loading={loadingAction === "prepareInteractionPlan"}
                   icon={<MessageCircle size={17} />}
-                  idleText="生成互动建议"
-                  loadingText="正在生成互动建议..."
+                  idleText="生成互动执行指令"
+                  loadingText="正在生成互动执行指令..."
                 />
               </button>
-              <p className="text-xs text-ink/55">真实账号互动只生成命令建议；是否执行由你在终端确认。</p>
+              <p className="text-xs text-ink/55">任务以成功评论 10 篇为完成标准，最多尝试 25 篇；遇到风控会提前停止。</p>
             </div>
           </form>
-
-          <div className="panel">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="section-title">命令建议</h2>
-                <p className="mt-1 text-sm text-ink/60">保留给 skill 的自主空间，不在网站里拆解互动细节。</p>
-              </div>
-              <IconButton title="复制命令包" onClick={() => copy(commandBundle)} icon={<Clipboard size={17} />} />
-            </div>
-            {!commands.length ? (
-              <EmptyState text="生成互动任务后显示命令建议。" />
-            ) : (
-              <div className="space-y-3">
-                {commands.map((command: any) => (
-                  <div key={`${command.category}-${command.command}`} className="rounded border border-ink/10 bg-white p-3">
-                    <div className="mb-2 flex items-center justify-between gap-3">
-                      <div>
-                        <div className="font-medium">{command.category}</div>
-                        <div className="text-xs text-ink/60">{command.description}</div>
-                      </div>
-                      <IconButton title="复制命令" onClick={() => copy(command.command)} icon={<Clipboard size={16} />} />
-                    </div>
-                    <code className="block overflow-auto rounded bg-ink px-3 py-2 text-xs text-white">{command.command}</code>
-                    <div className="mt-2 text-xs text-coral">{command.safetyNote}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
 
-        <div className="space-y-5">
-          <div className="panel">
+        <div className="min-w-0 space-y-5">
+          <div className="panel min-w-0 overflow-hidden">
             <div className="mb-3 flex items-center justify-between">
               <div>
-                <h2 className="section-title">互动任务</h2>
-                <p className="mt-1 text-sm text-ink/60">复制给 xiaohongshu_auto_op，让它基于已发布笔记自主完成找人和互动判断。</p>
+                <h2 className="section-title">给 OpenClaw 的互动执行任务</h2>
+                <p className="mt-1 text-sm text-ink/60">包含真实 CLI、普通用户筛选、评论规则、补充候选和成功计数要求。</p>
               </div>
               <div className="flex gap-2">
                 <IconButton title="复制互动任务" onClick={() => copy(taskPrompt)} icon={<Clipboard size={17} />} />
                 <IconButton title="导出 Markdown" onClick={() => downloadText(`${selected.name}-interaction-task.md`, taskPrompt)} icon={<Download size={17} />} />
               </div>
             </div>
-            <textarea className="code-textarea min-h-[560px]" value={taskPrompt || "填写已发布笔记 URL 后生成互动任务。"} readOnly />
+            <textarea className="code-textarea min-h-[720px]" value={taskPrompt || "选择一篇本周内容并生成互动执行指令。"} readOnly />
           </div>
         </div>
       </div>

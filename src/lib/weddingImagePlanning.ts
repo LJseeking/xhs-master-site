@@ -27,7 +27,7 @@ function assetLines(assets: Asset[] | undefined) {
   return assets
     .slice(0, 60)
     .map((asset, index) => {
-      const tags = [asset.sourceType, asset.tags, asset.suitableTypes, asset.authorizationState, asset.riskNotes]
+      const tags = [asset.sourceType, asset.tags, asset.suitableTypes, asset.riskNotes]
         .filter(Boolean)
         .join(" / ");
       return `${index + 1}. ${asset.filePath}${tags ? `｜${tags}` : ""}`;
@@ -105,7 +105,7 @@ ${latestStyleBrief(account)}
 3. 细节亮点：色系、材质、花材、层次、动线、仪式感、宾客体验、镜头角度、可被新人收藏的理由。
 4. 适合写成什么选题：蛋糕细节、花艺预算沟通、仪式区灵感、迎宾区高级感、桌面布置、备婚避坑、婚礼风格命名等。
 5. 图片可用性：适合封面 / 适合图集内页 / 只适合参考 / 需要补拍 / 需要裁切或打码。
-6. 风险：新人或宾客肖像、场地/品牌露出、合同价格、手机号、未授权内容、AI 痕迹、画质不足。
+6. 风险：新人或宾客隐私、场地/品牌露出、合同价格、手机号、侵权内容、AI 痕迹、画质不足。
 
 ## 第二步：只读研究小红书同行热门笔记
 请优先搜索并总结全国同类型热门笔记，不要照搬文字。建议关键词：
@@ -137,7 +137,7 @@ ${latestStyleBrief(account)}
 - 参考同行风格：只写可学习的表达方式，例如“标题用细节名 + 情绪 + 收藏理由”，不要引用原句。
 - 图上文字：每张图建议叠加的短字。
 - 互动问题：引导用户评论预算、风格、场地、喜欢的细节或备婚困惑。
-- 需要人工核验：价格、档期、场地、套餐、花材、肖像授权、案例授权。
+- 需要人工核验：价格、档期、场地、套餐、花材、案例真实性和人物隐私。
 - 缺口清单：如果图片不足，需要补拍哪些画面。
 
 ## 第四步：给后续精修提示
@@ -145,7 +145,7 @@ ${latestStyleBrief(account)}
 
 ## 安全边界
 - 不得伪造真实新人案例、宾客反馈、婚礼落地效果、价格、档期、场地、套餐和花材成本。
-- 不得使用未授权新人/宾客肖像；涉及人脸、手机号、合同、车牌、私人信息必须提示打码。
+- 涉及新人/宾客人脸、手机号、合同、车牌或私人信息时必须提示打码，避免侵犯肖像权和隐私。
 - 可以学习同行爆款的结构、节奏、情绪表达和收藏理由，但不能复制标题、正文或图片。
 - AI 改图只能做补光、构图、背景延展和信息卡排版，不能改变真实婚礼设计、场地结构、蛋糕层数、花材核心形态和肖像事实。
 - 所有未确认信息必须写“待确认”，不要写成事实。`;
@@ -159,7 +159,7 @@ export function buildWeddingImagePlanCommands(account: WeddingPlanAccount, optio
       category: "批量分析婚礼现场图片并生成帖子",
       command: `${base} xhs-content-ops draft-note --prompt-file ${q(options.promptFile)} ${accountFlag} --safe-mode`,
       description: `读取约 30 张婚礼素材库图片，先识别蛋糕、花艺、仪式区、迎宾区、桌花、席位卡等细节，再结合全国同行爆款研究，输出 ${options.weeks === 2 ? "两周" : "一周"}批量帖子方案。`,
-      safetyNote: "只生成规划和草稿建议；新人肖像、场地、价格、档期、套餐和授权必须人工核验。"
+      safetyNote: "只生成规划和草稿建议；新人隐私、场地、价格、档期、套餐和案例真实性必须人工核验。"
     }
   ];
 }

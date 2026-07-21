@@ -26,13 +26,13 @@ const modeNames: Record<AccountVisualMode, string> = {
 
 const modeImageFocus: Record<AccountVisualMode, string> = {
   culture_tourism: "目的地图、活动现场图、导览图、交通/票务截图、服务信息图",
-  heritage: "工艺细节图、作品图、活动现场图、体验过程图、授权人物图",
+  heritage: "工艺细节图、作品图、活动现场图、体验过程图、人物图",
   stay: "房间图、窗景图、公共区图、营地设施图、周边体验图、价格政策截图",
   food: "菜品图、套餐组合图、门店环境图、包间图、门头图、停车/交通图",
   outdoor: "真实现场图、路线图、轨迹截图、关键路况图、装备图、交通补给截图",
   museum: "展品图、展厅图、导览图、活动海报、票务预约截图、研学现场图",
   product: "产品图、包装图、原料图、制作过程图、产地图、价格规格图",
-  service: "门店空间图、服务流程图、工具设备图、资质图、授权案例图、价格预约信息图"
+  service: "门店空间图、服务流程图、工具设备图、资质图、案例图、价格预约信息图"
 };
 
 const modeSearchKeywords: Record<AccountVisualMode, string[]> = {
@@ -60,7 +60,7 @@ function assetLines(assets: Asset[] | undefined) {
   return assets
     .slice(0, 80)
     .map((asset, index) => {
-      const tags = [asset.sourceType, asset.tags, asset.suitableTypes, asset.authorizationState, asset.riskNotes].filter(Boolean).join(" / ");
+      const tags = [asset.sourceType, asset.tags, asset.suitableTypes, asset.riskNotes].filter(Boolean).join(" / ");
       return `${index + 1}. ${asset.filePath}${tags ? `｜${tags}` : ""}`;
     })
     .join("\n");
@@ -188,15 +188,15 @@ ${keywords.map((keyword) => `- ${keyword}`).join("\n")}
 - 参考同行风格：只写可学习的表达方式，不引用原句。
 - 图上文字：每张图建议叠加的短字。
 - 互动问题：引导用户评论预算、偏好、时间、路线、需求或顾虑。
-- 需要人工核验：所有价格、日期、地点、路线、库存、档期、授权、资质、效果和承诺。
+- 需要人工核验：所有价格、日期、地点、路线、库存、档期、资质、效果和承诺。
 - 缺口清单：如果图片不足，需要补拍哪些画面。
 
 ## 第四步：给后续精修提示
 在方案末尾，请挑出优先级最高的 3 篇，分别给出可以继续进入“单篇精修模式”的简短 Prompt。每条 Prompt 必须包含：标题、绑定图片、主轴、参考爆款风格、正文重点和风险边界。
 
 ## 安全边界
-- 不得伪造真实案例、用户反馈、服务效果、价格、日期、地点、路线、档期、库存、资质或授权。
-- 不得使用未授权肖像；涉及人脸、手机号、合同、车牌、私人信息必须提示打码。
+- 不得伪造真实案例、用户反馈、服务效果、价格、日期、地点、路线、档期、库存或资质。
+- 涉及人脸、手机号、合同、车牌或私人信息时必须提示打码，避免侵犯肖像权和隐私。
 - 可以学习同行爆款的结构、节奏、情绪表达和收藏理由，但不能复制标题、正文或图片。
 - AI 改图只能做补光、构图、背景延展和信息卡排版，不能改变真实事实。
 - 所有未确认信息必须写“待确认”，不要写成事实。`;
@@ -210,7 +210,7 @@ export function buildBatchImagePostsCommands(account: BatchPostAccount, options:
       category: "批量分析图片并生成帖子",
       command: `${base} xhs-content-ops draft-note --prompt-file ${q(options.promptFile)} ${accountFlag} --safe-mode`,
       description: `读取素材库图片，先识别可写图片，再结合全国同类型爆款研究，输出 ${options.weeks === 2 ? "两周" : "一周"}批量帖子方案。`,
-      safetyNote: "只生成方案和草稿建议；价格、日期、地点、路线、档期、库存、资质、授权和隐私必须人工核验。"
+      safetyNote: "只生成方案和草稿建议；价格、日期、地点、路线、档期、库存、资质和隐私必须人工核验。"
     }
   ];
 }

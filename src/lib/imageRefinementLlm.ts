@@ -1,0 +1,589 @@
+import { completeWithBackendAi } from "@/lib/backendAiClient";
+
+export type ImageRefinementAsset = {
+  id: number;
+  filePath: string;
+  fileUrl: string;
+  fileType: string;
+  sourceType: string;
+  location: string;
+  shotAt: string;
+  tags: string;
+  suitableTypes: string;
+  riskNotes: string;
+  width: number;
+  height: number;
+};
+
+export type ImageAutoSelectionItem = {
+  assetKey: string;
+  order: number;
+  role: string;
+  reason: string;
+};
+
+export type ImageAutoSelectionPlan = {
+  setStrategy: string;
+  images: ImageAutoSelectionItem[];
+};
+
+export type ImageTextBlock = {
+  text: string;
+  position: string;
+  style: string;
+};
+
+export type ImageRefinementRenderMode = "photo_refine" | "photo_with_text";
+
+export type ImageRefinementItem = {
+  assetKey: string;
+  order: number;
+  role: string;
+  recognitionBasis: string;
+  renderMode: ImageRefinementRenderMode;
+  editPrompt: string;
+  negativePrompt: string;
+  textBlocks: ImageTextBlock[];
+  reviewNotes: string;
+};
+
+export type ImageRefinementPlan = {
+  setStrategy: string;
+  globalEditRules: string[];
+  images: ImageRefinementItem[];
+  globalReviewNotes: string[];
+};
+
+export type AiAuxiliaryImageItem = {
+  order: number;
+  role: string;
+  visualBasis: string;
+  renderMode: "visual" | "info_card";
+  generationPrompt: string;
+  negativePrompt: string;
+  textBlocks: ImageTextBlock[];
+  textEditPrompt: string;
+  bodySentence: string;
+  reviewNotes: string;
+};
+
+export type AiAuxiliaryImagePlan = {
+  setStrategy: string;
+  globalGenerationRules: string[];
+  images: AiAuxiliaryImageItem[];
+  globalReviewNotes: string[];
+};
+
+type ImageRefinementResult =
+  | { usedLlm: true; data: ImageRefinementPlan; model: string }
+  | { usedLlm: false; error: string };
+
+type ImageAutoSelectionResult =
+  | { usedLlm: true; data: ImageAutoSelectionPlan; model: string }
+  | { usedLlm: false; error: string };
+
+function extractJson(text: string): Record<string, unknown> | null {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  const raw = fenced || (start >= 0 && end > start ? text.slice(start, end + 1) : "");
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.map(readString).filter(Boolean)
+    : [];
+}
+
+function readTextBlocks(value: unknown): ImageTextBlock[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((raw) => {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+      const item = raw as Record<string, unknown>;
+      const text = readString(item.text);
+      if (!text) return null;
+      return {
+        text,
+        position: readString(item.position) || "由版式确定的清晰可读区域",
+        style: readString(item.style) || "清晰、克制、适合小红书手机端阅读"
+      };
+    })
+    .filter((item): item is ImageTextBlock => Boolean(item));
+}
+
+function promptContainsAllText(prompt: string, blocks: ImageTextBlock[]) {
+  return blocks.every((block) => prompt.includes(block.text));
+}
+
+function appendExactTextInstructions(prompt: string, blocks: ImageTextBlock[]) {
+  if (!blocks.length || promptContainsAllText(prompt, blocks)) return prompt;
+  const instructions = blocks
+    .map((block, index) => `${index + 1}. 在${block.position}准确写入“${block.text}”，样式：${block.style}`)
+    .join("\n");
+  return `${prompt}\n\n必须在本次图片编辑中逐字完成以下文字排版，不得改写、漏写或使用占位文字：\n${instructions}`;
+}
+
+function describesStructuredTextLayout(value: string) {
+  return /信息卡|结构说明图|流程图|要点图|路线卡|气泡|标题区|流程节点|卡片栏位|文字框|文字占位/.test(value);
+}
+
+export function imageRefinementAssetKey(asset: ImageRefinementAsset, index: number) {
+  return `asset-${index + 1}-${asset.id}`;
+}
+
+function parseAutoSelectionPlan(
+  text: string,
+  assets: ImageRefinementAsset[],
+  imageCount: number
+): ImageAutoSelectionPlan | null {
+  const parsed = extractJson(text);
+  if (!parsed || !Array.isArray(parsed.images) || parsed.images.length !== imageCount) return null;
+
+  const expectedKeys = new Set(assets.map(imageRefinementAssetKey));
+  const seenKeys = new Set<string>();
+  const seenOrders = new Set<number>();
+  const images: ImageAutoSelectionItem[] = [];
+
+  for (const rawItem of parsed.images) {
+    if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) return null;
+    const item = rawItem as Record<string, unknown>;
+    const assetKey = readString(item.assetKey);
+    const order = typeof item.order === "number" ? item.order : Number(item.order);
+    const role = readString(item.role);
+    const reason = readString(item.reason);
+    if (
+      !expectedKeys.has(assetKey)
+      || seenKeys.has(assetKey)
+      || !Number.isInteger(order)
+      || order < 1
+      || order > imageCount
+      || seenOrders.has(order)
+      || !role
+      || !reason
+    ) {
+      return null;
+    }
+    seenKeys.add(assetKey);
+    seenOrders.add(order);
+    images.push({ assetKey, order, role, reason });
+  }
+
+  if (seenKeys.size !== imageCount || seenOrders.size !== imageCount) return null;
+  images.sort((a, b) => a.order - b.order);
+  return {
+    setStrategy: readString(parsed.setStrategy) || "根据笔记目标和素材标签选择并排序最匹配的图片。",
+    images
+  };
+}
+
+function parsePlan(
+  text: string,
+  assets: ImageRefinementAsset[],
+  selectionMode: "manual" | "ai_auto"
+): ImageRefinementPlan | null {
+  const parsed = extractJson(text);
+  if (!parsed || !Array.isArray(parsed.images)) return null;
+
+  const expectedKeys = new Set(assets.map(imageRefinementAssetKey));
+  const seenKeys = new Set<string>();
+  const items: ImageRefinementItem[] = [];
+
+  for (const rawItem of parsed.images) {
+    if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) return null;
+    const item = rawItem as Record<string, unknown>;
+    const key = readString(item.assetKey);
+    const rawEditPrompt = readString(item.editPrompt);
+    const requestedRenderMode: ImageRefinementRenderMode = readString(item.renderMode) === "photo_with_text"
+      ? "photo_with_text"
+      : "photo_refine";
+    const textBlocks = readTextBlocks(item.textBlocks);
+    if (!expectedKeys.has(key) || seenKeys.has(key) || !rawEditPrompt) return null;
+    const renderMode: ImageRefinementRenderMode = requestedRenderMode === "photo_with_text" && textBlocks.length
+      ? "photo_with_text"
+      : "photo_refine";
+    const normalizedTextBlocks = renderMode === "photo_with_text" ? textBlocks : [];
+    const editPrompt = renderMode === "photo_with_text"
+      ? appendExactTextInstructions(rawEditPrompt, normalizedTextBlocks)
+      : rawEditPrompt;
+
+    seenKeys.add(key);
+    items.push({
+      assetKey: key,
+      order: 0,
+      role: readString(item.role) || "正文配图",
+      recognitionBasis: readString(item.recognitionBasis) || "根据素材文件和已有元数据概括",
+      renderMode,
+      editPrompt,
+      negativePrompt: readString(item.negativePrompt) || "不得改变真实主体、空间结构、产品形态、人物身份或事实信息。",
+      textBlocks: normalizedTextBlocks,
+      reviewNotes: readString(item.reviewNotes) || "保留原图真实主体、结构和事实信息。"
+    });
+  }
+
+  if (items.length !== assets.length || seenKeys.size !== expectedKeys.size) return null;
+  const itemsByKey = new Map(items.map((item) => [item.assetKey, item]));
+  const orderedItems = assets.map((asset, index) => itemsByKey.get(imageRefinementAssetKey(asset, index)));
+  if (orderedItems.some((item) => !item)) return null;
+
+  return {
+    setStrategy: readString(parsed.setStrategy)
+      || `按照${selectionMode === "ai_auto" ? "AI 自动选图" : "用户指定"}顺序安排封面和正文图集，保持整组图片风格统一。`,
+    globalEditRules: readStringArray(parsed.globalEditRules),
+    images: orderedItems.map((item, index) => ({ ...item!, order: index + 1 })),
+    globalReviewNotes: readStringArray(parsed.globalReviewNotes)
+  };
+}
+
+function parseAiAuxiliaryImagePlan(text: string, imageCount: number): AiAuxiliaryImagePlan | null {
+  const parsed = extractJson(text);
+  if (!parsed || !Array.isArray(parsed.images) || parsed.images.length !== imageCount) return null;
+
+  const seenOrders = new Set<number>();
+  const images: AiAuxiliaryImageItem[] = [];
+  for (const rawItem of parsed.images) {
+    if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) return null;
+    const item = rawItem as Record<string, unknown>;
+    const order = typeof item.order === "number" ? item.order : Number(item.order);
+    const generationPrompt = readString(item.generationPrompt);
+    const renderMode = readString(item.renderMode) === "info_card" ? "info_card" : "visual";
+    const textBlocks = readTextBlocks(item.textBlocks);
+    const textEditPrompt = readString(item.textEditPrompt);
+    const requiresTextCompletion = renderMode === "info_card"
+      || describesStructuredTextLayout(`${readString(item.role)} ${generationPrompt}`);
+    if (!Number.isInteger(order) || order < 1 || order > imageCount || seenOrders.has(order) || !generationPrompt) {
+      return null;
+    }
+    if (
+      (requiresTextCompletion && !textBlocks.length)
+      || (textBlocks.length && (!textEditPrompt || !promptContainsAllText(textEditPrompt, textBlocks)))
+    ) {
+      return null;
+    }
+
+    seenOrders.add(order);
+    images.push({
+      order,
+      role: readString(item.role) || "正文辅助图",
+      visualBasis: readString(item.visualBasis) || "依据笔记内容生成非事实证据型辅助画面。",
+      renderMode,
+      generationPrompt,
+      negativePrompt: readString(item.negativePrompt) || "不要生成 Logo、真实地点或未经确认的事实信息。",
+      textBlocks,
+      textEditPrompt,
+      bodySentence: readString(item.bodySentence),
+      reviewNotes: readString(item.reviewNotes) || "核对画面没有被误认为真实现场或事实证据。"
+    });
+  }
+
+  if (seenOrders.size !== imageCount) return null;
+  images.sort((a, b) => a.order - b.order);
+  return {
+    setStrategy: readString(parsed.setStrategy) || "围绕笔记内容生成一组结构明确、风格统一的辅助图片。",
+    globalGenerationRules: readStringArray(parsed.globalGenerationRules),
+    images,
+    globalReviewNotes: readStringArray(parsed.globalReviewNotes)
+  };
+}
+
+export async function generateImageAutoSelectionWithLlm(input: {
+  account: Record<string, unknown>;
+  noteTask: Record<string, unknown>;
+  noteContent: string;
+  singleGoal: string;
+  styleBrief: string[];
+  expertRules: string;
+  imageCount: number;
+  assets: ImageRefinementAsset[];
+}): Promise<ImageAutoSelectionResult> {
+  const model = process.env.OPENAI_MODEL || "gpt-5.5";
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("backend ai timeout"), 8 * 60 * 1000);
+  const assets = input.assets.map((asset, index) => ({
+    assetKey: imageRefinementAssetKey(asset, index),
+    id: asset.id,
+    filePath: asset.filePath,
+    fileUrl: asset.fileUrl,
+    tags: asset.tags,
+    suitableTypes: asset.suitableTypes,
+    location: asset.location,
+    shotAt: asset.shotAt,
+    sourceType: asset.sourceType,
+    width: asset.width,
+    height: asset.height
+  }));
+
+  try {
+    const response = await completeWithBackendAi({
+      model,
+      signal: controller.signal,
+      instructions: `你是小红书单篇笔记的素材选图策划师。你只能读取素材标签、文件名和其他文字元数据，不能查看图片本身。你的任务是从当前账号的候选素材中，选择最符合本篇笔记目标、内容方向和图集叙事的指定数量图片，并给出最终使用顺序。
+
+不得声称看过图片，不得根据 URL 猜测画面，不得虚构标签中没有的信息。标签缺失或过于笼统时，应降低该素材优先级，但候选素材不足时仍可结合文件名、适用内容、地点和尺寸做保守判断。
+
+只返回 JSON，不要返回 Markdown、解释或代码块。`,
+      input: `请从候选素材中选择恰好 ${input.imageCount} 张图片。
+
+硬性要求：
+- 只能选择候选素材中存在的 assetKey，不能创造、重复或遗漏 assetKey。
+- images 必须恰好包含 ${input.imageCount} 项，order 必须从 1 连续到 ${input.imageCount}。
+- 第 1 张固定作为封面，优先匹配封面方向、主题识别度和竖版可用性。
+- 其余图片按照笔记正文结构安排叙事顺序，每张图片承担不同且明确的职责。
+- 选择依据只能来自 tags、suitableTypes、filePath、location、shotAt、sourceType 和尺寸等文字元数据。
+- reason 必须写清素材标签与本篇笔记信息的匹配关系，不得写成已经识别了真实画面。
+- 不要生成图片精修 Prompt；本次只负责选图和排序。
+
+账号和任务上下文：
+${JSON.stringify(
+  {
+    account: input.account,
+    noteTask: input.noteTask,
+    noteContent: input.noteContent,
+    singleGoal: input.singleGoal,
+    styleBrief: input.styleBrief,
+    expertRules: input.expertRules
+  },
+  null,
+  2
+)}
+
+候选素材：
+${JSON.stringify(assets, null, 2)}
+
+返回以下 JSON：
+{
+  "setStrategy": "本篇图集的选图与排序策略",
+  "images": [
+    {
+      "assetKey": "原样返回候选素材中的 assetKey",
+      "order": 1,
+      "role": "封面/场景说明/细节说明/信息补充等",
+      "reason": "仅根据素材标签和文字元数据说明选择理由"
+    }
+  ]
+}`
+    });
+
+    if (!response.ok) return { usedLlm: false, error: response.error };
+    const plan = parseAutoSelectionPlan(response.text, input.assets, input.imageCount);
+    if (!plan) {
+      return { usedLlm: false, error: "AI 返回的自动选图结果不完整、包含无效素材或无法解析，请重试。" };
+    }
+    return { usedLlm: true, data: plan, model: response.model || model };
+  } catch (error) {
+    return { usedLlm: false, error: error instanceof Error ? error.message : "后端 AI 自动选图调用失败。" };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function generateImageRefinementPlanWithLlm(input: {
+  account: Record<string, unknown>;
+  noteTask: Record<string, unknown>;
+  noteContent: string;
+  singleGoal: string;
+  styleBrief: string[];
+  expertRules: string;
+  assets: ImageRefinementAsset[];
+  baseRequirements: string;
+  selectionMode?: "manual" | "ai_auto";
+}): Promise<ImageRefinementResult> {
+  const model = process.env.OPENAI_MODEL || "gpt-5.5";
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("backend ai timeout"), 8 * 60 * 1000);
+  const assets = input.assets.map((asset, index) => ({
+    assetKey: imageRefinementAssetKey(asset, index),
+    ...asset
+  }));
+  const selectionMode = input.selectionMode === "ai_auto" ? "ai_auto" : "manual";
+  const selectionDescription = selectionMode === "ai_auto"
+    ? "后端选图 AI 已经根据候选素材标签完成选图和排序"
+    : "用户已经手动完成选图和排序";
+
+  try {
+    const response = await completeWithBackendAi({
+      model,
+      signal: controller.signal,
+      instructions: `你是小红书图文内容的图片精修策划师。你的任务是根据账号、笔记目标和已经确定的素材元数据，为每张素材生成一条可供 xiaohongshu_auto_op edit-image 使用的精修 Prompt。
+
+当前接口只能读取文字和素材元数据，不能直接查看 URL 对应的图片。不得声称已经看过图片，不得虚构图片中不存在的人物、空间、产品、景观、设施、文字或事实。Prompt 必须采用保守编辑策略，要求执行端以指定原图为准，保留真实主体、结构和关键信息。
+
+只返回 JSON，不要返回 Markdown、解释或代码块。`,
+      input: `请为下面这组已经确定的图片生成一份完整的逐图精修计划。
+
+硬性要求：
+- images 必须与输入 assets 一一对应，不能遗漏、重复或增加素材。
+- assetKey 必须原样返回。
+- ${selectionDescription}，精修阶段不得评价、筛选、替换或建议其他图片。
+- assets 的输入顺序就是已经确定的最终图集顺序，禁止重新排序；第一张固定作为封面，一张输入素材必须对应一张精修成品。
+- order 必须等于对应素材在输入 assets 中从 1 开始的序号。
+- editPrompt 必须是可直接传给图片编辑模型的中文提示词，明确保留什么、调整什么、禁止改变什么。
+- 默认使用 photo_refine，只做照片级精修：调整构图、光线、色彩、清晰度和必要的背景整理。不得主动把真实图片改造成信息卡、流程图、结构说明图、路线/要点卡，不得增加空白气泡、空白文字框、卡片容器或文字占位区域。
+- 使用 photo_refine 时 textBlocks 必须返回空数组，不要规划任何图上文字。
+- 只有笔记目标、封面方向或用户额外要求明确需要图上文字时，才使用 photo_with_text。此时 textBlocks 必须列出所有准确文字，editPrompt 必须逐字包含这些文字，并要求图片模型在本次 edit-image 中直接完成排版；不得输出“待填写”“后期添加”等占位内容。
+- 每个文字块尽量不超过 12 个汉字，每张图片不超过 6 个文字块。不得添加未经核验的价格、路线参数、营业时间、联系方式或业务事实。
+- 如果素材信息不足，使用保守精修，不得补造具体事实。
+- 素材标签只作为策划参考，执行端以指定原图为准；不得要求执行端比较标签后停止任务。
+- reviewNotes 只写事实信息和成品效果的必要核验项，不得要求比较原图与素材标签是否一致。
+- 输出尺寸由程序固定为 1536x2048，不要自行编写 CLI 命令。
+
+账号和任务上下文：
+${JSON.stringify(
+  {
+    account: input.account,
+    noteTask: input.noteTask,
+    noteContent: input.noteContent,
+    singleGoal: input.singleGoal,
+    styleBrief: input.styleBrief,
+    expertRules: input.expertRules
+  },
+  null,
+  2
+)}
+
+已经确定的素材：
+${JSON.stringify(assets, null, 2)}
+
+现有图片硬规则和内容要求：
+${input.baseRequirements}
+
+返回以下 JSON：
+{
+  "setStrategy": "整组图片的视觉和叙事策略",
+  "globalEditRules": ["整组统一规则"],
+  "images": [
+    {
+      "assetKey": "原样返回输入 assetKey",
+      "order": 1,
+      "role": "封面/正文信息图/场景图等",
+      "recognitionBasis": "根据文件名、标签和适用内容概括的素材信息",
+      "renderMode": "photo_refine 或 photo_with_text",
+      "editPrompt": "可直接用于 edit-image 的完整中文精修 Prompt",
+      "negativePrompt": "本图禁止出现或禁止修改的内容",
+      "textBlocks": [],
+      "reviewNotes": "执行前和出图后的人工核验项"
+    }
+  ],
+  "globalReviewNotes": ["整组图片的真实性和业务信息核验项"]
+}`
+    });
+
+    if (!response.ok) return { usedLlm: false, error: response.error };
+    const plan = parsePlan(response.text, input.assets, selectionMode);
+    if (!plan) {
+      return { usedLlm: false, error: "AI 返回的逐图精修结果不完整或无法解析，请重试。" };
+    }
+    return { usedLlm: true, data: plan, model: response.model || model };
+  } catch (error) {
+    return { usedLlm: false, error: error instanceof Error ? error.message : "后端 AI 调用失败。" };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function generateAiAuxiliaryImagePlanWithLlm(input: {
+  account: Record<string, unknown>;
+  noteTask: Record<string, unknown>;
+  noteContent: string;
+  singleGoal: string;
+  styleBrief: string[];
+  expertRules: string;
+  imageCount: number;
+  baseRequirements: string;
+}): Promise<
+  | { usedLlm: true; data: AiAuxiliaryImagePlan; model: string }
+  | { usedLlm: false; error: string }
+> {
+  const model = process.env.OPENAI_MODEL || "gpt-5.5";
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("backend ai timeout"), 8 * 60 * 1000);
+
+  try {
+    const response = await completeWithBackendAi({
+      model,
+      signal: controller.signal,
+      instructions: `你是小红书图文内容的 AI 辅助图策划师。你只能读取文字上下文，不能查看任何图片。你的任务是把账号定位、单篇笔记目标和内容方向转换成一组可由 xiaohongshu_auto_op xhs-creative 完整执行的逐图中文 Prompt。
+
+这些图片是辅助表达，不是事实证据。没有真实素材时，不得伪造真实地点、真实路线、真实门店、真实房型、真实产品、真实人物、真实客户、真实案例、票据、轨迹或经营信息。涉及这些内容时，可以设计完整信息卡、结构说明图、流程图、要点图、低拟真插画或不指向具体事实的氛围辅助画面。凡是包含信息框、气泡、标题区、流程节点或卡片栏位的画面，最终成品必须填入准确文字，不能留下空白占位框。
+
+只返回 JSON，不要返回 Markdown、解释或代码块。`,
+      input: `请生成 ${input.imageCount} 张 AI 辅助图的逐图执行方案。
+
+硬性要求：
+- images 必须恰好包含 ${input.imageCount} 项，order 必须从 1 连续到 ${input.imageCount}，不得遗漏、重复或增加。
+- generationPrompt 必须是完整、明确、可单独直接传给 generate-image 的中文提示词，不能让 OpenClaw 再自行策划画面。
+- 每条 generationPrompt 必须明确：图片用途、主体与信息层级、构图、视觉风格、光线或配色、3:4 竖版构图，以及事实真实性边界。
+- 输出尺寸由 CLI 固定为 1536x2048，Prompt 中只需使用 3:4 竖版构图语言，不要编写 CLI 命令。
+- 各张图片必须承担不同信息职责，并共同服务笔记叙事顺序。
+- renderMode 只能是 visual 或 info_card。普通辅助画面使用 visual；包含信息框、气泡、流程节点、标题区、要点栏位的图片必须使用 info_card。
+- info_card 必须提供非空 textBlocks 和 textEditPrompt；textEditPrompt 必须逐字包含所有 textBlocks.text，并明确要求基于生成底图使用 edit-image 完成文字排版。不得生成只有空白框、空白气泡或占位区域的最终成品。
+- visual 如果需要文字，同样必须提供 textBlocks 和 textEditPrompt；不需要文字时两者留空。
+- 每个文字块尽量不超过 12 个汉字，每张图片不超过 6 个文字块。文字必须准确、简短、可直接发布，禁止使用“待填写”“后期添加”等占位词。
+- 不得生成 Logo、水印、车牌、手机号或可识别个人信息。
+- negativePrompt 要写本图特有的禁止项；OpenClaw 会把它与 generationPrompt 一起传给图片模型。
+- 不得把 AI 画面描述成真实现场、真实案例、真实测量结果或真实用户反馈。
+- 若笔记缺少可核验的地点、路线、产品或业务事实，使用抽象信息图底图、非纪实插画或通用氛围画面，并在 reviewNotes 中标明人工核验项。
+
+账号和任务上下文：
+${JSON.stringify(
+  {
+    account: input.account,
+    noteTask: input.noteTask,
+    noteContent: input.noteContent,
+    singleGoal: input.singleGoal,
+    styleBrief: input.styleBrief,
+    expertRules: input.expertRules
+  },
+  null,
+  2
+)}
+
+现有图片硬规则和内容要求：
+${input.baseRequirements}
+
+返回以下 JSON：
+{
+  "setStrategy": "整组辅助图的视觉与叙事策略",
+  "globalGenerationRules": ["整组图片统一规则"],
+  "images": [
+    {
+      "order": 1,
+      "role": "封面辅助图/结构说明图/信息卡底图等",
+      "visualBasis": "本图依据的笔记内容，以及为何不构成事实证据",
+      "renderMode": "visual 或 info_card",
+      "generationPrompt": "可直接用于 generate-image 的完整中文 Prompt",
+      "negativePrompt": "本图禁止生成的内容和禁止造成的误导",
+      "textBlocks": [{ "text": "最终成品必须出现的准确文字", "position": "位置", "style": "字体、颜色与版式" }],
+      "textEditPrompt": "基于生成底图调用 edit-image 添加全部准确文字的完整 Prompt；无文字时留空",
+      "bodySentence": "与本图对应的正文句；不需要则留空",
+      "reviewNotes": "出图后必须人工核验的事项"
+    }
+  ],
+  "globalReviewNotes": ["整组图片的真实性、合规和内容核验项"]
+}`
+    });
+
+    if (!response.ok) return { usedLlm: false, error: response.error };
+    const plan = parseAiAuxiliaryImagePlan(response.text, input.imageCount);
+    if (!plan) {
+      return { usedLlm: false, error: "AI 返回的逐图辅助图结果不完整或无法解析，请重试。" };
+    }
+    return { usedLlm: true, data: plan, model: response.model || model };
+  } catch (error) {
+    return { usedLlm: false, error: error instanceof Error ? error.message : "后端 AI 调用失败。" };
+  } finally {
+    clearTimeout(timeout);
+  }
+}

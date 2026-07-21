@@ -34,7 +34,7 @@ textarea {
 
 @layer components {
   .panel {
-    @apply rounded-md border border-ink/10 bg-white/70 p-5 shadow-panel;
+    @apply min-w-0 max-w-full rounded-md border border-ink/10 bg-white/70 p-5 shadow-panel;
   }
 
   .section-title {
@@ -54,7 +54,7 @@ textarea {
   }
 
   .field {
-    @apply grid gap-1.5 text-sm;
+    @apply grid min-w-0 max-w-full gap-1.5 text-sm;
   }
 
   .field span {
@@ -64,7 +64,7 @@ textarea {
   .field input,
   .field textarea,
   .field select {
-    @apply h-11 w-full rounded border border-ink/15 bg-white px-3 text-sm leading-none outline-none transition focus:border-teal focus:ring-2 focus:ring-teal/15;
+    @apply h-11 min-w-0 max-w-full w-full rounded border border-ink/15 bg-white px-3 text-sm leading-none outline-none transition focus:border-teal focus:ring-2 focus:ring-teal/15;
   }
 
   .field .input-with-icon {
@@ -72,6 +72,6 @@ textarea {
   }
 
   .code-textarea {
-    @apply w-full rounded border border-ink/10 bg-white p-4 font-mono text-sm leading-6 outline-none focus:border-teal focus:ring-2 focus:ring-teal/15;
+    @apply min-w-0 max-w-full w-full rounded border border-ink/10 bg-white p-4 font-mono text-sm leading-6 outline-none focus:border-teal focus:ring-2 focus:ring-teal/15;
   }
 }

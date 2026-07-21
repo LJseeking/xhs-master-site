@@ -60,7 +60,6 @@ export async function POST(request: Request) {
     suitableTypes: String(body.suitableTypes || "图生图 / 封面 / 图集素材"),
     coverReady: Boolean(body.coverReady),
     used: false,
-    authorizationState: String(body.authorizationState || "已授权"),
     riskNotes: String(body.riskNotes || "本地文件夹批量登记；图改图前仍需确认素材与真实业务/经历一致。")
   }));
 

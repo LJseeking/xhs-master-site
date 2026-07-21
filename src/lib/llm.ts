@@ -258,7 +258,6 @@ ${JSON.stringify(
       tags: asset.tags,
       suitableTypes: asset.suitableTypes,
       coverReady: asset.coverReady,
-      authorizationState: asset.authorizationState,
       riskNotes: asset.riskNotes
     })),
     weeklyPlan: input.weeklyPlan,
