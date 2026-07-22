@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createAsyncRouteTask, getAsyncRouteTask } from "@/lib/asyncRouteTask";
 import { accountVisualMode, buildCompactImageStyleBrief, buildImagePrompt, buildImageStyleStudy, isWeddingAccount } from "@/lib/imagePrompts";
 import { styleBriefFromStudy } from "@/lib/imageStyleStudy";
 import { formatExpertRulesForPrompt } from "@/lib/expertLearning";
@@ -413,10 +414,8 @@ function commandCopy(account: { accountType: string; name: string; personaBase: 
   return copies[mode];
 }
 
-export async function POST(request: Request, _context: { params: { id: string } }) {
-  const requestId = request.headers.get("x-request-id") || `image-refinement-${Date.now()}`;
+async function buildImagePromptResult(body: any, requestId: string) {
   const startedAt = Date.now();
-  const body = await request.json().catch(() => ({}));
   const openclawImagePaths = String(body.openclawImagePaths || "");
   const imageSourceMode = ["ai_generate", "remote_images", "ai_auto_select"].includes(String(body.imageSourceMode))
     ? String(body.imageSourceMode)
@@ -427,33 +426,31 @@ export async function POST(request: Request, _context: { params: { id: string } 
   const normalizedImageCount = normalizeImageCount(imageCount);
   const noteTask = body.noteTask;
   const account = body.account;
-  if (!noteTask || !account) return NextResponse.json({ error: "缺少任务上下文" }, { status: 400 });
+  if (!noteTask || !account) throw new Error("缺少任务上下文");
   if (!String(account.accountParam || "").trim()) {
-    return NextResponse.json({ error: "当前账号未配置 OpenClaw skill 账号参数，无法确定账号素材目录。" }, { status: 400 });
+    throw new Error("当前账号未配置 OpenClaw skill 账号参数，无法确定账号素材目录。");
   }
   const remoteImageUrls = nonEmptyLines(openclawImagePaths);
   if (imageSourceMode === "remote_images" && (!remoteImageUrls.length || remoteImageUrls.some((url) => !remotePath(url)))) {
-    return NextResponse.json({ error: "请选择至少一张具有完整 HTTP(S) URL 的后端素材图片。" }, { status: 400 });
+    throw new Error("请选择至少一张具有完整 HTTP(S) URL 的后端素材图片。");
   }
   let selectedAssets = imageSourceMode === "remote_images"
     ? normalizeSelectedAssets(body.selectedAssets, remoteImageUrls)
     : [];
   if (imageSourceMode === "remote_images" && !selectedAssets.length) {
-    return NextResponse.json({ error: "未能读取所选素材的图片信息。" }, { status: 400 });
+    throw new Error("未能读取所选素材的图片信息。");
   }
   if (imageSourceMode === "remote_images" && Array.isArray(body.selectedAssets)) {
     const metadataUrls = selectedAssets.map((asset) => asset.fileUrl);
     if (metadataUrls.length !== remoteImageUrls.length || remoteImageUrls.some((url) => !metadataUrls.includes(url))) {
-      return NextResponse.json({ error: "所选图片 URL 与素材信息不一致，请重新选择图片后再生成。" }, { status: 400 });
+      throw new Error("所选图片 URL 与素材信息不一致，请重新选择图片后再生成。");
     }
   }
   const candidateAssets = imageSourceMode === "ai_auto_select"
     ? normalizeSelectedAssets(body.candidateAssets ?? account.assets, []).filter(isImageAsset)
     : [];
   if (imageSourceMode === "ai_auto_select" && candidateAssets.length < normalizedImageCount) {
-    return NextResponse.json({
-      error: `当前账号只有 ${candidateAssets.length} 张具有有效 URL 的素材库图片，无法自动选择 ${normalizedImageCount} 张。请补充素材或减少图片数量。`
-    }, { status: 400 });
+    throw new Error(`当前账号只有 ${candidateAssets.length} 张具有有效 URL 的素材库图片，无法自动选择 ${normalizedImageCount} 张。请补充素材或减少图片数量。`);
   }
 
   const latestReference = account.referenceResearches?.[0];
@@ -517,10 +514,7 @@ export async function POST(request: Request, _context: { params: { id: string } 
         elapsedMs: Date.now() - startedAt,
         error: selectionResult.error
       });
-      return NextResponse.json(
-        { error: `OpenAI API 未能完成 AI 自动选图：${selectionResult.error}` },
-        { status: 502 }
-      );
+      throw new Error(`OpenAI API 未能完成 AI 自动选图：${selectionResult.error}`);
     }
 
     const assetsByKey = new Map(candidateAssets.map((asset, index) => [imageRefinementAssetKey(asset, index), asset]));
@@ -528,7 +522,7 @@ export async function POST(request: Request, _context: { params: { id: string } 
       .map((item) => assetsByKey.get(item.assetKey))
       .filter((asset): asset is ImageRefinementAsset => Boolean(asset));
     if (selectedAssets.length !== normalizedImageCount) {
-      return NextResponse.json({ error: "AI 自动选图结果包含无效素材，请重试。" }, { status: 502 });
+      throw new Error("AI 自动选图结果包含无效素材，请重试。");
     }
     autoSelectionPlan = selectionResult.data;
     selectionModel = selectionResult.model;
@@ -587,10 +581,7 @@ export async function POST(request: Request, _context: { params: { id: string } 
         elapsedMs: Date.now() - startedAt,
         error: refinementResult.error
       });
-      return NextResponse.json(
-        { error: `OpenAI API 未能生成${imageSourceMode === "ai_auto_select" ? "自动选图后的" : ""}逐图图片精修任务：${refinementResult.error}` },
-        { status: 502 }
-      );
+      throw new Error(`OpenAI API 未能生成${imageSourceMode === "ai_auto_select" ? "自动选图后的" : ""}逐图图片精修任务：${refinementResult.error}`);
     }
 
     aiModel = refinementResult.model;
@@ -631,10 +622,7 @@ export async function POST(request: Request, _context: { params: { id: string } 
         elapsedMs: Date.now() - startedAt,
         error: generationResult.error
       });
-      return NextResponse.json(
-        { error: `OpenAI API 未能生成 AI 辅助图逐图任务：${generationResult.error}` },
-        { status: 502 }
-      );
+      throw new Error(`OpenAI API 未能生成 AI 辅助图逐图任务：${generationResult.error}`);
     }
 
     aiModel = generationResult.model;
@@ -673,7 +661,7 @@ export async function POST(request: Request, _context: { params: { id: string } 
     }
   ];
 
-  return NextResponse.json({
+  return {
     openclawTask: {
       title: openclawTask.title,
       content: openclawTask.content
@@ -692,5 +680,27 @@ export async function POST(request: Request, _context: { params: { id: string } 
       requestId
     },
     commands
-  });
+  };
+}
+
+export async function POST(request: Request, _context: { params: { id: string } }) {
+  const requestId = request.headers.get("x-request-id") || `image-refinement-${Date.now()}`;
+  const body = await request.json().catch(() => ({}));
+  if (!body.noteTask || !body.account) {
+    return NextResponse.json({ error: "缺少任务上下文" }, { status: 400 });
+  }
+
+  const task = createAsyncRouteTask(() => buildImagePromptResult(body, requestId));
+  return NextResponse.json({ async: true, uuid: task.uuid, status: task.status, requestId });
+}
+
+export async function GET(request: Request) {
+  const uuid = new URL(request.url).searchParams.get("uuid")?.trim();
+  if (!uuid) return NextResponse.json({ error: "缺少 uuid" }, { status: 400 });
+
+  const task = getAsyncRouteTask<Awaited<ReturnType<typeof buildImagePromptResult>>>(uuid);
+  if (!task) return NextResponse.json({ error: "任务不存在或已过期" }, { status: 404 });
+  if (task.status === "pending") return NextResponse.json({ async: true, uuid, status: "pending" });
+  if (task.status === "failed") return NextResponse.json({ async: true, uuid, status: "failed", error: task.error || "任务执行失败" });
+  return NextResponse.json({ async: true, uuid, status: "completed", result: task.result });
 }

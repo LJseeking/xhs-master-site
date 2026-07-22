@@ -1408,6 +1408,25 @@ function mergeBackendAccountWithLocalState(account: Account, local?: Account): A
 const ASYNC_ROUTE_POLL_INTERVAL_MS = 30_000;
 const ASYNC_ROUTE_MAX_POLL_ATTEMPTS = 20;
 
+async function readApiJsonResponse(response: Response, fallbackMessage: string): Promise<Record<string, any>> {
+  const responseText = await response.text();
+  const contentType = response.headers.get("content-type")?.toLowerCase() || "";
+  const statusLabel = `HTTP ${response.status}`;
+
+  if (!responseText.trim()) {
+    throw new Error(`${fallbackMessage}（${statusLabel}，服务返回了空响应，可能是网关超时或连接中断）。`);
+  }
+  if (!contentType.includes("application/json")) {
+    throw new Error(`${fallbackMessage}（${statusLabel}，服务返回了非 JSON 响应，可能是网关错误）。`);
+  }
+
+  try {
+    return JSON.parse(responseText) as Record<string, any>;
+  } catch {
+    throw new Error(`${fallbackMessage}（${statusLabel}，服务返回的 JSON 无法解析）。`);
+  }
+}
+
 async function waitForNextAsyncRoutePoll(ms: number) {
   await new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
@@ -1599,7 +1618,7 @@ export function XhsMasterApp() {
         headers: { "content-type": "application/json" },
         cache: "no-store"
       });
-      const data = await res.json().catch(() => ({}));
+      const data = await readApiJsonResponse(res, "任务结果查询失败");
       if (!res.ok) {
         throw new Error(data.error || "任务结果查询失败。");
       }
@@ -2149,15 +2168,18 @@ export function XhsMasterApp() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...(options || {}), account: selected, noteTask: task })
       });
-      const data = await res.json();
+      const data = await readApiJsonResponse(res, "创建图片方案任务失败");
       if (!res.ok) throw new Error(data.error || "生成图片方案失败。");
-      setImagePromptResults((current) => ({ ...current, [task.id]: data }));
+      const resolved = data.async && data.uuid
+        ? await waitForAsyncRouteResult<ImagePromptResult>(`/api/note-tasks/${task.id}/image-prompt`, data.uuid)
+        : data as ImagePromptResult;
+      setImagePromptResults((current) => ({ ...current, [task.id]: resolved }));
       const savedTask = await saveBackendNoteTask(
         selected.id,
         latestPlan.id,
         toBackendNoteTask({
           ...task,
-          imagePlan: data.imagePrompt?.content || task.imagePlan || "",
+          imagePlan: resolved.imagePrompt?.content || task.imagePlan || "",
           status: task.status || "已生成图片方案"
         })
       );
@@ -4488,7 +4510,6 @@ function InteractionsPanel(props: {
               根据当篇笔记和互动目标生成完整执行任务。OpenClaw 将负责选词、搜索、过滤普通用户、生成评论并累计完成 10 篇有效互动。
             </p>
           </div>
-          <div className="rounded bg-coral/10 px-3 py-2 text-sm font-medium text-coral">评论由 OpenClaw 直接执行，触发风控立即停止</div>
         </div>
 
         <div className="grid gap-3 md:grid-cols-3">
