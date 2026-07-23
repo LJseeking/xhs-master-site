@@ -45,6 +45,7 @@ import {
   saveBackendNoteTask,
   saveBackendWeeklyPlan,
   updateBackendAccount,
+  buildProxyHeaders,
   type BackendAccountDetail,
   type BackendAsset,
   type BackendNoteTask,
@@ -1759,13 +1760,7 @@ export function XhsMasterApp() {
 
         const uploadRes = await fetch("/api/assets/upload", {
           method: "POST",
-          headers: {
-            "Xhs-Sign": token,
-            "Xhs-Person": String(user.uid),
-            "Xhs-Time": Math.floor(Date.now() / 1000).toString(),
-            "Xhs-Request-Id": `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-            "Xhs-Test": "1"
-          },
+          headers: buildProxyHeaders(),
           body: uploadForm
         });
         const uploadData = await uploadRes.json().catch(() => ({}));
@@ -3638,13 +3633,7 @@ function ImagesPanel(props: {
 
     const uploadRes = await fetch("/api/assets/upload", {
       method: "POST",
-      headers: {
-        "Xhs-Sign": token,
-        "Xhs-Person": String(user.uid),
-        "Xhs-Time": Math.floor(Date.now() / 1000).toString(),
-        "Xhs-Request-Id": `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-        "Xhs-Test": "1"
-      },
+      headers: buildProxyHeaders(),
       body: uploadForm
     });
     const uploadData = await uploadRes.json().catch(() => ({}));

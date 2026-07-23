@@ -3,6 +3,7 @@
  * 默认测试服: http://xhsapitest.powermatrix.tech/client
  */
 import { getBackendApiBaseUrl } from "@/lib/backendApi";
+import { buildBackendSignedHeaders, buildProxyAuthHeaders } from "@/lib/xhsSignature";
 
 const API_BASE_URL = getBackendApiBaseUrl();
 
@@ -163,22 +164,17 @@ export function isLoggedIn(): boolean {
   return !!getToken();
 }
 
-export function buildAuthHeaders() {
+export function buildProxyHeaders() {
   const token = getToken();
   const user = getUser();
   if (!token || !user) {
     throw new Error("未登录");
   }
 
-  return {
-    "Content-Type": "application/json",
-    "Xhs-Language": "zh-cn",
-    "Xhs-Sign": token,
-    "Xhs-Person": String(user.uid),
-    "Xhs-Time": Math.floor(Date.now() / 1000).toString(),
-    "Xhs-Request-Id": `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-    "Xhs-Test": "1"
-  };
+  return buildProxyAuthHeaders({
+    token,
+    uid: String(user.uid)
+  });
 }
 
 /* ---------- 通用请求函数 ---------- */
@@ -215,7 +211,18 @@ export async function authRequest<T = unknown>(
 ): Promise<ApiResponse<T>> {
   const { method = "GET", body } = options;
   const bodyStr = body ? JSON.stringify(body) : "";
-  const headers = buildAuthHeaders();
+  const token = getToken();
+  const user = getUser();
+  if (!token || !user) {
+    throw new Error("未登录");
+  }
+  const headers = buildBackendSignedHeaders({
+    url: `${API_BASE_URL}${path}`,
+    method,
+    body: bodyStr,
+    token,
+    uid: String(user.uid)
+  });
 
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method,
@@ -379,7 +386,10 @@ export async function saveBackendNoteTask(accountId: number, weeklyPlanId: numbe
 export async function syncBackendAccounts() {
   const res = await fetch("/api/accounts/sync", {
     method: "POST",
-    headers: buildAuthHeaders()
+    headers: {
+      "Content-Type": "application/json",
+      ...buildProxyHeaders()
+    }
   });
 
   const data = (await res.json().catch(() => ({}))) as {
