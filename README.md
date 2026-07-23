@@ -49,7 +49,6 @@
 ```bash
 cp .env.example .env
 npm install
-npm run db:init
 npm run dev -- --port 3000
 ```
 
@@ -91,19 +90,15 @@ http://localhost:3000
 npm run dev -- --port 3000
 npm run build
 npm run start
-npm run db:init
-npm run prisma:seed
 ```
 
-## 数据目录
+## 内容目录
 
-- SQLite 数据库：`prisma/dev.db`
-- Prisma schema：`prisma/schema.prisma`
 - 账号配置：`profiles/<账号名>/AGENTS.md`
 - 素材目录：`assets/<账号名>/`
 - 素材 manifest：`assets/<账号名>/manifest.md`
 
-`prisma/dev.db`、`.env`、`.next`、`node_modules` 默认不提交。
+`.env`、`.next`、`node_modules` 默认不提交。
 
 ## 素材上传流程
 

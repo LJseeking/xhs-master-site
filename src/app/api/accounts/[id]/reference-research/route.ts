@@ -94,7 +94,7 @@ async function buildReferenceResearchResult(body: z.infer<typeof bodySchema>) {
   });
 
   if (!summaryResult.usedLlm) {
-    throw new Error(`OpenAI API 未能完成参考账号总结：${summaryResult.error || "未知错误"}`);
+    throw new Error(`AI 未能完成参考账号总结：${summaryResult.error || "未知错误"}`);
   }
 
   const research = {
@@ -140,7 +140,7 @@ async function buildReferenceResearchResult(body: z.infer<typeof bodySchema>) {
   });
 
   if (!strategyResult.usedLlm) {
-    throw new Error(`OpenAI API 未能基于爆款研究重生成策划案：${strategyResult.error || "未知错误"}`);
+    throw new Error(`AI 未能基于爆款研究重生成策划案：${strategyResult.error || "未知错误"}`);
   }
 
   return {

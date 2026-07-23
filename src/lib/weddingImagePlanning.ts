@@ -1,4 +1,4 @@
-import type { Account, AccountImageStyleStudy, AccountReferenceResearch, Asset } from "@prisma/client";
+import type { Account, AccountImageStyleStudy, AccountReferenceResearch, Asset } from "@/types/domain";
 import { isWeddingAccount } from "@/lib/imagePrompts";
 
 type WeddingPlanAccount = Account & {

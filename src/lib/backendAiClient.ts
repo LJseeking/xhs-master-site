@@ -68,7 +68,7 @@ async function waitForBackendAiResult(input: {
     const json = (await response.json().catch(() => ({}))) as BackendAiResponse;
 
     if (!response.ok || json.status === false) {
-      return { ok: false, error: json.message || `后端 AI 结果查询失败（HTTP ${response.status}）。` };
+      return { ok: false, error: json.message || `AI 服务结果查询失败（HTTP ${response.status}）。` };
     }
 
     const taskStatus = String(json.data?.status || "").toLowerCase();
@@ -81,17 +81,17 @@ async function waitForBackendAiResult(input: {
     }
 
     if (["failed", "error", "cancelled", "canceled"].includes(taskStatus)) {
-      return { ok: false, error: json.data?.error || json.message || `后端 AI 任务执行失败（${taskStatus}）。` };
+      return { ok: false, error: json.data?.error || json.message || `AI 服务任务执行失败（${taskStatus}）。` };
     }
 
     if (taskStatus && !["pending", "queued", "processing", "running"].includes(taskStatus)) {
-      return { ok: false, error: `后端 AI 返回了未知任务状态：${taskStatus}` };
+      return { ok: false, error: `AI 服务返回了未知任务状态：${taskStatus}` };
     }
 
     await waitForNextPoll(input.signal);
   }
 
-  return { ok: false, error: "后端 AI 任务等待超时，请稍后重试。" };
+  return { ok: false, error: "AI 服务任务等待超时，请稍后重试。" };
 }
 
 export async function completeWithBackendAi(input: {
@@ -118,7 +118,7 @@ export async function completeWithBackendAi(input: {
     const json = (await response.json().catch(() => ({}))) as BackendAiResponse;
 
     if (!response.ok || json.status === false) {
-      return { ok: false, error: json.message || `后端 AI 接口调用失败（HTTP ${response.status}）。` };
+      return { ok: false, error: json.message || `AI 服务调用失败（HTTP ${response.status}）。` };
     }
 
     if (json.data?.text) {
@@ -137,7 +137,7 @@ export async function completeWithBackendAi(input: {
       });
     }
 
-    return { ok: false, error: json.message || "后端 AI 接口返回结果不完整。" };
+    return { ok: false, error: json.message || "AI 服务返回结果不完整。" };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "AI 接口调用失败。" };
   }

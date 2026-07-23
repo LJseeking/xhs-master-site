@@ -1,4 +1,4 @@
-import type { Account, AccountStrategy, Asset, NoteTask, WeeklyPlan } from "@prisma/client";
+import type { Account, AccountStrategy, Asset, NoteTask, WeeklyPlan } from "@/types/domain";
 
 export function listBlock(items: string[]) {
   return items.filter(Boolean).map((item) => `- ${item}`).join("\n");

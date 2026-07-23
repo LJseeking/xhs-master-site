@@ -308,7 +308,7 @@ export async function generateImageAutoSelectionWithLlm(input: {
   imageCount: number;
   assets: ImageRefinementAsset[];
 }): Promise<ImageAutoSelectionResult> {
-  const model = process.env.OPENAI_MODEL || "gpt-5.5";
+  const model = process.env.AI_MODEL || "gpt-5.5";
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("backend ai timeout"), 8 * 60 * 1000);
   const assets = input.assets.map((asset, index) => ({
@@ -383,7 +383,7 @@ ${JSON.stringify(assets, null, 2)}
     }
     return { usedLlm: true, data: plan, model: response.model || model };
   } catch (error) {
-    return { usedLlm: false, error: error instanceof Error ? error.message : "后端 AI 自动选图调用失败。" };
+    return { usedLlm: false, error: error instanceof Error ? error.message : "AI 自动选图调用失败。" };
   } finally {
     clearTimeout(timeout);
   }
@@ -400,7 +400,7 @@ export async function generateImageRefinementPlanWithLlm(input: {
   baseRequirements: string;
   selectionMode?: "manual" | "ai_auto";
 }): Promise<ImageRefinementResult> {
-  const model = process.env.OPENAI_MODEL || "gpt-5.5";
+  const model = process.env.AI_MODEL || "gpt-5.5";
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("backend ai timeout"), 8 * 60 * 1000);
   const assets = input.assets.map((asset, index) => ({
@@ -487,7 +487,7 @@ ${input.baseRequirements}
     }
     return { usedLlm: true, data: plan, model: response.model || model };
   } catch (error) {
-    return { usedLlm: false, error: error instanceof Error ? error.message : "后端 AI 调用失败。" };
+    return { usedLlm: false, error: error instanceof Error ? error.message : "AI 调用失败。" };
   } finally {
     clearTimeout(timeout);
   }
@@ -506,7 +506,7 @@ export async function generateAiAuxiliaryImagePlanWithLlm(input: {
   | { usedLlm: true; data: AiAuxiliaryImagePlan; model: string }
   | { usedLlm: false; error: string }
 > {
-  const model = process.env.OPENAI_MODEL || "gpt-5.5";
+  const model = process.env.AI_MODEL || "gpt-5.5";
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("backend ai timeout"), 8 * 60 * 1000);
 
@@ -582,7 +582,7 @@ ${input.baseRequirements}
     }
     return { usedLlm: true, data: plan, model: response.model || model };
   } catch (error) {
-    return { usedLlm: false, error: error instanceof Error ? error.message : "后端 AI 调用失败。" };
+    return { usedLlm: false, error: error instanceof Error ? error.message : "AI 调用失败。" };
   } finally {
     clearTimeout(timeout);
   }

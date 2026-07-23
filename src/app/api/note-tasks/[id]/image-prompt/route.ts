@@ -295,7 +295,7 @@ uv run python scripts/cli.py edit-image \\
 6. 后台子会话严格按照下方“逐图任务”的顺序和“本图精修 Prompt”逐张执行。每次把当前图片的本地绝对路径设置为 \`INPUT_IMAGE\`，把该图 Prompt 设置为 \`IMAGE_PROMPT\`，执行一次图片编辑命令，并完成对应成品验收。`
     : `1. 进入已安装的 xiaohongshu_auto_op skill 根目录。
 2. 设置 \`ACCOUNT_NAME=${accountName}\`、\`TASK_DIR="$PWD/.openclaw_tasks/${taskName}"\`、\`BASE_OUTPUT_DIR="$TASK_DIR/base-images"\`、\`ACCOUNT_ASSETS_DIR="$PWD/assets/$ACCOUNT_NAME"\`，然后创建这些目录。
-3. 严格按照下方“逐图任务”的顺序执行；每张图的“本图生成 Prompt”和“本图文字编辑 Prompt”已经由后端 AI 生成，不得擅自改写、合并或省略。
+3. 严格按照下方“逐图任务”的顺序执行；每张图的“本图生成 Prompt”和“本图文字编辑 Prompt”已经由 AI 生成，不得擅自改写、合并或省略。
 4. 如果本图“成品文字”为“无”，设置 \`IMAGE_OUTPUT_DIR="$ACCOUNT_ASSETS_DIR"\`，将“本图负向约束”追加到 \`IMAGE_PROMPT\` 后执行一次 generate-image；其返回 JSON 中的 \`local_path\` 就是最终成品。
 5. 如果本图存在“成品文字”，设置 \`IMAGE_OUTPUT_DIR="$BASE_OUTPUT_DIR"\`，先执行 generate-image 取得返回 JSON 中的 \`local_path\`，并将该路径设置为 \`BASE_IMAGE\`。该底图只是中间产物，不得写入 \`image-paths.txt\`。
 6. 对存在“成品文字”的图片，把完整“本图文字编辑 Prompt”设置为 \`TEXT_EDIT_PROMPT\`，以 \`BASE_IMAGE\` 为输入执行 edit-image。必须把“成品文字”中的所有文字逐字写入对应位置；edit-image 返回的 \`local_path\` 才是最终成品。
@@ -514,7 +514,7 @@ async function buildImagePromptResult(body: any, requestId: string) {
         elapsedMs: Date.now() - startedAt,
         error: selectionResult.error
       });
-      throw new Error(`OpenAI API 未能完成 AI 自动选图：${selectionResult.error}`);
+      throw new Error(`AI 未能完成自动选图：${selectionResult.error}`);
     }
 
     const assetsByKey = new Map(candidateAssets.map((asset, index) => [imageRefinementAssetKey(asset, index), asset]));
@@ -581,7 +581,7 @@ async function buildImagePromptResult(body: any, requestId: string) {
         elapsedMs: Date.now() - startedAt,
         error: refinementResult.error
       });
-      throw new Error(`OpenAI API 未能生成${imageSourceMode === "ai_auto_select" ? "自动选图后的" : ""}逐图图片精修任务：${refinementResult.error}`);
+      throw new Error(`AI 未能生成${imageSourceMode === "ai_auto_select" ? "自动选图后的" : ""}逐图图片精修任务：${refinementResult.error}`);
     }
 
     aiModel = refinementResult.model;
@@ -622,7 +622,7 @@ async function buildImagePromptResult(body: any, requestId: string) {
         elapsedMs: Date.now() - startedAt,
         error: generationResult.error
       });
-      throw new Error(`OpenAI API 未能生成 AI 辅助图逐图任务：${generationResult.error}`);
+      throw new Error(`AI 未能生成辅助图逐图任务：${generationResult.error}`);
     }
 
     aiModel = generationResult.model;

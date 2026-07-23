@@ -1,4 +1,4 @@
-import type { Account, AccountStrategy, NoteTask, WeeklyPlan } from "@prisma/client";
+import type { Account, AccountStrategy, NoteTask, WeeklyPlan } from "@/types/domain";
 import { accountVisualMode, isWeddingAccount, type AccountVisualMode } from "@/lib/imagePrompts";
 
 export function buildTaskPrompt(input: {

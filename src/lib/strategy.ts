@@ -1,4 +1,4 @@
-import type { Account, AccountTypeTemplate } from "@prisma/client";
+import type { Account, AccountTypeTemplate } from "@/types/domain";
 import { jsonListBlock, listBlock } from "@/lib/markdown";
 
 function parseJson<T>(value: string, fallback: T): T {

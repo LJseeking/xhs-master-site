@@ -1,4 +1,4 @@
-import type { Account, AccountImageStyleStudy } from "@prisma/client";
+import type { Account, AccountImageStyleStudy } from "@/types/domain";
 import { accountVisualMode, buildCompactImageStyleBrief, buildImageStyleStudy, isWeddingAccount, type AccountVisualMode } from "@/lib/imagePrompts";
 
 function q(value: string) {

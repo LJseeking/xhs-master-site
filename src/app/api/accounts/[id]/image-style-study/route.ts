@@ -63,7 +63,7 @@ export async function POST(request: Request, context: { params: { id: string } }
       return {
         study: savedStudy,
         summary,
-        warning: summaryResult.usedLlm ? "" : summaryResult.error || "OpenAI 未完成总结，已使用本地规则生成图片风格摘要。"
+        warning: summaryResult.usedLlm ? "" : summaryResult.error || "AI 未完成总结，已使用本地规则生成图片风格摘要。"
       };
     });
 

@@ -1,4 +1,4 @@
-import type { Account, AccountImageStyleStudy, AccountReferenceResearch, Asset } from "@prisma/client";
+import type { Account, AccountImageStyleStudy, AccountReferenceResearch, Asset } from "@/types/domain";
 import { accountVisualMode, isWeddingAccount, type AccountVisualMode } from "@/lib/imagePrompts";
 
 type BatchPostAccount = Account & {

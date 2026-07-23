@@ -70,13 +70,7 @@ try {
   const config = environments[env];
   const baseEnv = parseEnvFile(envPath);
   const passthroughKeys = [
-    "DATABASE_URL",
-    "XHS_AUTO_OP_PATH",
-    "XHS_MEMORY_PATH",
-    "XHS_MASTER_MODE",
-    "OPENAI_API_KEY",
-    "OPENAI_MODEL",
-    "OPENAI_BASE_URL"
+    "AI_MODEL"
   ];
   const extraLines = passthroughKeys
     .map((key) => {
@@ -84,22 +78,10 @@ try {
       return typeof value === "string" && value !== "" ? `${key}=${value}` : null;
     })
     .filter(Boolean);
-  const publicOpenAiLines = [
-    process.env.OPENAI_API_KEY || baseEnv.OPENAI_API_KEY
-      ? `NEXT_PUBLIC_OPENAI_API_KEY=${process.env.OPENAI_API_KEY || baseEnv.OPENAI_API_KEY}`
-      : null,
-    process.env.OPENAI_MODEL || baseEnv.OPENAI_MODEL
-      ? `NEXT_PUBLIC_OPENAI_MODEL=${process.env.OPENAI_MODEL || baseEnv.OPENAI_MODEL}`
-      : null,
-    process.env.OPENAI_BASE_URL || baseEnv.OPENAI_BASE_URL
-      ? `NEXT_PUBLIC_OPENAI_BASE_URL=${process.env.OPENAI_BASE_URL || baseEnv.OPENAI_BASE_URL}`
-      : null
-  ].filter(Boolean);
   const content = [
     `NEXT_PUBLIC_APP_ENVIRONMENT=${config.appEnvironment}`,
     `NEXT_PUBLIC_API_BASE_URL=${config.apiBaseUrl}`,
     ...extraLines,
-    ...publicOpenAiLines,
     ""
   ].join("\n");
 

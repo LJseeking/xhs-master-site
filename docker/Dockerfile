@@ -14,14 +14,10 @@ RUN groupadd --system nodejs && useradd --system --gid nodejs nextjs
 
 COPY --chown=nextjs:nodejs ./.next/standalone ./
 COPY --chown=nextjs:nodejs ./.next/static ./.next/static
-COPY --chown=nextjs:nodejs ./node_modules/.prisma ./node_modules/.prisma
-COPY --chown=nextjs:nodejs ./node_modules/@prisma ./node_modules/@prisma
 COPY --chown=nextjs:nodejs ./public ./public
-COPY --chown=nextjs:nodejs ./prisma ./prisma
 COPY --chown=nextjs:nodejs ./assets ./assets
 COPY --chown=nextjs:nodejs ./profiles ./profiles
 COPY --chown=nextjs:nodejs ./prompts ./prompts
-COPY --chown=nextjs:nodejs ./local-data ./local-data
 COPY --chown=nextjs:nodejs ./.env.local ./.env.local
 COPY --chown=nextjs:nodejs ./entrypoint /app/entrypoint
 

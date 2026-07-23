@@ -1,4 +1,4 @@
-import type { Account, AccountStrategy, AccountTypeTemplate, Asset, NoteTask, WeeklyPlan } from "@prisma/client";
+import type { Account, AccountStrategy, AccountTypeTemplate, Asset, NoteTask, WeeklyPlan } from "@/types/domain";
 import { getBackendApiBaseUrl } from "@/lib/backendApi";
 import { completeWithBackendAi } from "@/lib/backendAiClient";
 import type { StrategyBundle } from "@/lib/strategy";
@@ -44,7 +44,7 @@ type WeeklyPlanInput = {
 export function getLlmStatus() {
   return {
     enabled: true,
-    model: process.env.OPENAI_MODEL || "gpt-5.5",
+    model: process.env.AI_MODEL || "gpt-5.5",
     baseUrl: `${getBackendApiBaseUrl()}/ai/v1/complete`
   };
 }
@@ -160,7 +160,7 @@ export async function regenerateStrategyFromReferenceResearchWithLlm(input: {
 
   const prompt = `请严格基于“参考账号研究结果”重生成小红书账号策划案和 AGENTS.md。
 
-这是一个必须由 OpenAI API 参与的重生成步骤。请不要只复述模板；要把参考账号研究中的栏目、标题、封面、互动方式、用户评论痛点、差异化机会转化为我方账号的人设和运营策略。
+这是一个必须借助 AI 重生成的步骤。请不要只复述模板；要把参考账号研究中的栏目、标题、封面、互动方式、用户评论痛点、差异化机会转化为我方账号的人设和运营策略。
 
 硬性要求：
 - 当前产品模式是 Prompt + Command only，不允许真实发布、评论、点赞、收藏、关注或私信。
@@ -210,7 +210,7 @@ JSON 字段：
 
   const parsed = extractJson(response.text);
   if (!parsed || typeof parsed !== "object") {
-    return { usedLlm: false, data: input.fallback, error: "OpenAI 返回内容不是可解析 JSON，未重生成策划案。" };
+    return { usedLlm: false, data: input.fallback, error: "AI 返回内容不是可解析 JSON，未重生成策划案。" };
   }
 
   return {

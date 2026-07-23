@@ -1,4 +1,4 @@
-import type { Account, AccountTypeTemplate, ExpertRule, NoteTask } from "@prisma/client";
+import type { Account, AccountTypeTemplate, ExpertRule, NoteTask } from "@/types/domain";
 
 function q(value: string) {
   return JSON.stringify(value);

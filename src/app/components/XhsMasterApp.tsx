@@ -4956,16 +4956,8 @@ function HealthPanel({ health, loadHealth }: { health: any; loadHealth: () => vo
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           <Info label="当前模式" value={health.mode} />
-          <Info label="OpenAI API" value={`${health.llm.enabled ? "已配置" : "未配置"} / ${health.llm.model}`} />
-          <Info label="xiaohongshu_auto_op 路径" value={health.xhsAutoOpPath} />
-          <Info label="profiles 目录" value={`${health.profiles.exists ? "可用" : "缺失"} / ${health.profiles.path}`} />
-          <Info label="assets 目录" value={`${health.assets.exists ? "可用" : "缺失"} / ${health.assets.path}`} />
+          <Info label="AI 服务" value={`${health.llm.enabled ? "可用" : "不可用"} / ${health.llm.model}`} />
           <Info label="uv" value={`${health.uv.available ? "可用" : "不可用"} / ${health.uv.version}`} />
-          <Info label="数据统计" value={`账号 ${health.counts.accounts} / 素材 ${health.counts.assets}`} />
-          <div className="md:col-span-2">
-            <div className="mb-2 text-sm font-medium">MEMORY.md 摘要</div>
-            <pre className="max-h-72 overflow-auto rounded border border-ink/10 bg-white p-3 text-xs">{health.memorySummary}</pre>
-          </div>
           <div className="md:col-span-2">
             <div className="mb-2 text-sm font-medium">环境诊断报告</div>
             <div className="space-y-2">

@@ -1,4 +1,4 @@
-import type { Account, AccountReferenceResearch, NoteTask } from "@prisma/client";
+import type { Account, AccountReferenceResearch, NoteTask } from "@/types/domain";
 
 export type AccountVisualMode = "culture_tourism" | "heritage" | "stay" | "food" | "outdoor" | "museum" | "product" | "service";
 

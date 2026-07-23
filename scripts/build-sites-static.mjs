@@ -36,7 +36,7 @@ const json = (data, init = {}) =>
   });
 
 const cloudOnlyNotice =
-  "这个外网预览版已发布页面与静态资源。本机 SQLite、文件上传和本地目录读写功能需要迁移到云端 D1/R2 后才能在外网完整使用。";
+  "这个外网预览版已发布页面与静态资源。本机文件上传和本地目录读写功能需要迁移到云端对象存储后才能在外网完整使用。";
 
 export default {
   async fetch(request, env) {
@@ -52,7 +52,6 @@ export default {
         mode: "sites-static-preview",
         checks: [
           { label: "页面发布", ok: true, detail: "外网可访问" },
-          { label: "本机数据库", ok: false, detail: "外网版本未连接本机 SQLite" },
           { label: "文件目录", ok: false, detail: "外网版本不能访问发布者电脑上的 assets/profiles" },
         ],
         note: cloudOnlyNotice,

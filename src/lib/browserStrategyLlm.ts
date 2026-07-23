@@ -64,8 +64,8 @@ type WeeklyPlanInput = {
 function getBrowserLlmStatus() {
   return {
     enabled: true,
-    model: "backend-ai",
-    baseUrl: "backend-ai"
+    model: process.env.AI_MODEL || "gpt-5.5",
+    baseUrl: "ai/v1/complete"
   };
 }
 

@@ -1,4 +1,4 @@
-import type { Account, AccountTypeTemplate } from "@prisma/client";
+import type { Account, AccountTypeTemplate } from "@/types/domain";
 
 function q(value: string) {
   return JSON.stringify(value);
@@ -97,7 +97,7 @@ export function fallbackReferenceSummary(rawResults: string) {
 ${excerpt || "暂无原始结果。"}
 
 ## 使用建议
-- 请补充 OpenAI API key 后重新总结，或手工整理参考账号内容特色。
+- 请检查 AI 服务是否可用后重新总结，或手工整理参考账号内容特色。
 - 生成策划案时应重点参考账号栏目、标题、封面、评论痛点和差异化机会。`,
     contentFeatures: "待补充：参考账号内容栏目、标题、封面、互动方式。",
     personaInsights: "待补充：参考账号人设表达与可差异化人设方向。",

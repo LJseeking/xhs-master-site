@@ -1,4 +1,4 @@
-import type { Account, AccountStrategy, Asset, WeeklyPlan } from "@prisma/client";
+import type { Account, AccountStrategy, Asset, WeeklyPlan } from "@/types/domain";
 import { addDays, format, startOfWeek } from "date-fns";
 import { accountVisualMode, isWeddingAccount, type AccountVisualMode } from "@/lib/imagePrompts";
 

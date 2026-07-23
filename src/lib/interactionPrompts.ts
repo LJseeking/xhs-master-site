@@ -1,4 +1,4 @@
-import type { Account, AccountStrategy, NoteTask } from "@prisma/client";
+import type { Account, AccountStrategy, NoteTask } from "@/types/domain";
 import { accountVisualMode } from "@/lib/imagePrompts";
 
 type CommandSuggestion = {
