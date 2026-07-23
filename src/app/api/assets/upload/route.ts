@@ -1,6 +1,7 @@
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { getBackendApiBaseUrl } from "@/lib/backendApi";
+import { buildBackendSignedHeaders } from "@/lib/xhs-signature";
 
 const API_BASE_URL = getBackendApiBaseUrl();
 
@@ -45,21 +46,24 @@ async function createSignedUpload(file: File, request: Request) {
     throw new Error("登录信息缺失，请重新登录后再上传素材。");
   }
 
+  const payload = JSON.stringify({
+    type: "image",
+    ext: getFileExt(file)
+  });
+
   const res = await fetch(`${API_BASE_URL}/cos/v1/signedUploadUrl`, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "xhs-language": "zh-cn",
-      "xhs-sign": xhsSign,
-      "xhs-person": xhsPerson,
-      "xhs-time": xhsTime,
-      "xhs-request-id": xhsRequestId,
-      "xhs-test": xhsTest
-    },
-    body: JSON.stringify({
-      type: "image",
-      ext: getFileExt(file)
-    })
+    headers: buildBackendSignedHeaders({
+      url: `${API_BASE_URL}/cos/v1/signedUploadUrl`,
+      method: "POST",
+      body: payload,
+      token: xhsSign,
+      uid: xhsPerson,
+      time: xhsTime,
+      requestId: xhsRequestId,
+      test: xhsTest
+    }),
+    body: payload
   });
 
   const data = (await res.json()) as BackendResponse<SignedUploadUrlResponse>;
@@ -81,21 +85,24 @@ async function createBatchSignedUploads(files: File[], request: Request) {
     throw new Error("登录信息缺失，请重新登录后再上传素材。");
   }
 
+  const payload = JSON.stringify({
+    type: "image",
+    exts: files.map((file) => getFileExt(file))
+  });
+
   const res = await fetch(`${API_BASE_URL}/cos/v1/batchSignedUploadUrl`, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "xhs-language": "zh-cn",
-      "xhs-sign": xhsSign,
-      "xhs-person": xhsPerson,
-      "xhs-time": xhsTime,
-      "xhs-request-id": xhsRequestId,
-      "xhs-test": xhsTest
-    },
-    body: JSON.stringify({
-      type: "image",
-      exts: files.map((file) => getFileExt(file))
-    })
+    headers: buildBackendSignedHeaders({
+      url: `${API_BASE_URL}/cos/v1/batchSignedUploadUrl`,
+      method: "POST",
+      body: payload,
+      token: xhsSign,
+      uid: xhsPerson,
+      time: xhsTime,
+      requestId: xhsRequestId,
+      test: xhsTest
+    }),
+    body: payload
   });
 
   const data = (await res.json()) as BackendResponse<BatchSignedUploadUrlResponse>;

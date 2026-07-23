@@ -3,7 +3,7 @@
  * 默认测试服: http://xhsapitest.powermatrix.tech/client
  */
 import { getBackendApiBaseUrl } from "@/lib/backendApi";
-import { buildBackendSignedHeaders, buildProxyAuthHeaders } from "@/lib/xhsSignature";
+import { buildBackendSignedHeaders, buildProxyAuthHeaders } from "@/lib/xhs-signature";
 
 const API_BASE_URL = getBackendApiBaseUrl();
 
