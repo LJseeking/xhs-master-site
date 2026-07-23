@@ -16,8 +16,8 @@ type BackendAiResponse = {
   };
 };
 
-const POLL_INTERVAL_MS = 2000;
-const POLL_TIMEOUT_MS = 8 * 60 * 1000;
+const POLL_INTERVAL_MS = 30_000;
+const POLL_MAX_ATTEMPTS = 20;
 
 function abortMessage(signal?: AbortSignal) {
   if (!signal?.aborted) return "";
@@ -54,9 +54,8 @@ async function waitForBackendAiResult(input: {
 }): Promise<BackendAiResult> {
   const baseUrl = getBackendApiBaseUrl();
   const resultUrl = `${baseUrl}/ai/v1/complete/result?uuid=${encodeURIComponent(input.uuid)}`;
-  const deadline = Date.now() + POLL_TIMEOUT_MS;
 
-  while (Date.now() < deadline) {
+  for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt += 1) {
     const aborted = abortMessage(input.signal);
     if (aborted) return { ok: false, error: aborted };
 
@@ -86,6 +85,10 @@ async function waitForBackendAiResult(input: {
 
     if (taskStatus && !["pending", "queued", "processing", "running"].includes(taskStatus)) {
       return { ok: false, error: `AI 服务返回了未知任务状态：${taskStatus}` };
+    }
+
+    if (attempt === POLL_MAX_ATTEMPTS - 1) {
+      return { ok: false, error: "AI 服务任务等待超时，请稍后重试。" };
     }
 
     await waitForNextPoll(input.signal);
