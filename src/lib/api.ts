@@ -249,8 +249,8 @@ export async function login(email: string, password: string): Promise<LoginRespo
 /**
  * 注册
  */
-export async function register(email: string, name: string, password: string): Promise<LoginResponse> {
-  const res = await publicRequest<LoginResponse>("/login/v1/register", { email, name, password });
+export async function register(email: string, name: string, password: string, betaCode: string): Promise<LoginResponse> {
+  const res = await publicRequest<LoginResponse>("/login/v1/register", { email, name, password, betaCode });
   if (!res.status) {
     throw new Error(res.message || "注册失败");
   }

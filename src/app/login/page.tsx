@@ -12,6 +12,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  const [betaCode, setBetaCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -33,7 +34,11 @@ export default function LoginPage() {
           setError("请输入用户名");
           return;
         }
-        await register(email, name, password);
+        if (!betaCode.trim()) {
+          setError("请输入内测码");
+          return;
+        }
+        await register(email, name, password, betaCode.trim());
       }
       router.replace("/");
     } catch (err) {
@@ -82,6 +87,24 @@ export default function LoginPage() {
                     placeholder="请输入用户名"
                     className="input-with-icon"
                     autoComplete="name"
+                  />
+                </div>
+              </label>
+            )}
+
+            {mode === "register" && (
+              <label className="field">
+                <span>内测码</span>
+                <div className="relative">
+                  <User size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink/40" />
+                  <input
+                    type="text"
+                    value={betaCode}
+                    onChange={(e) => setBetaCode(e.target.value)}
+                    placeholder="请输入 6 位内测码"
+                    className="input-with-icon"
+                    autoComplete="one-time-code"
+                    maxLength={6}
                   />
                 </div>
               </label>
