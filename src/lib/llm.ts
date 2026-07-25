@@ -5,6 +5,7 @@ import type { StrategyBundle } from "@/lib/strategy";
 import { fallbackReferenceSummary } from "@/lib/referenceResearch";
 import { fallbackInteractionSummary } from "@/lib/interactionPrompts";
 import { summarizeImageStyleStudyFallback } from "@/lib/imageStyleStudy";
+import type { RecentWeeklyTopicGroup } from "@/lib/weeklyTopicHistory";
 
 type LlmResult<T> =
   | { usedLlm: true; data: T; model: string }
@@ -39,6 +40,8 @@ type WeeklyPlanInput = {
   interactionGoal: string;
   availableAssets: string;
   taboos: string;
+  weeklyFocus?: string;
+  recentTopicGroups?: RecentWeeklyTopicGroup[];
 };
 
 export function getLlmStatus() {
@@ -160,7 +163,7 @@ export async function regenerateStrategyFromReferenceResearchWithLlm(input: {
 
   const prompt = `请严格基于“参考账号研究结果”重生成小红书账号策划案和 AGENTS.md。
 
-这是一个必须由 OpenAI API 参与的重生成步骤。请不要只复述模板；要把参考账号研究中的栏目、标题、封面、互动方式、用户评论痛点、差异化机会转化为我方账号的人设和运营策略。
+这是一个必须由 OpenAI API 参与的重生成步骤。请不要只复述模板；要把参考账号研究中的作者定位、栏目、标题、正文、图片风格、互动引导、用户痛点和差异化机会转化为我方账号的人设和运营策略。
 
 硬性要求：
 - 当前产品模式是 Prompt + Command only，不允许真实发布、评论、点赞、收藏、关注或私信。
@@ -237,19 +240,60 @@ export async function generateWeeklyTasksWithLlm(input: {
   const status = getLlmStatus();
   if (!status.enabled) return { usedLlm: false, data: input.fallbackTasks, error: "AI 未启用，已使用内置模板生成。" };
 
+  const recentTopicGroups = input.weeklyInput.recentTopicGroups || [];
+  const weeklyInputContext = {
+    theme: input.weeklyInput.theme,
+    goal: input.weeklyInput.goal,
+    frequency: input.weeklyInput.frequency,
+    ratio: input.weeklyInput.ratio,
+    testHypothesis: input.weeklyInput.testHypothesis,
+    commercializationMove: input.weeklyInput.commercializationMove,
+    interactionGoal: input.weeklyInput.interactionGoal,
+    availableAssets: input.weeklyInput.availableAssets,
+    taboos: input.weeklyInput.taboos,
+    weeklyFocus: input.weeklyInput.weeklyFocus
+  };
+  const accountContext = {
+    id: input.account.id,
+    name: input.account.name,
+    accountParam: input.account.accountParam,
+    accountType: input.account.accountType,
+    stage: input.account.stage,
+    personaBase: input.account.personaBase,
+    city: input.account.city,
+    targetUsers: input.account.targetUsers,
+    painPoints: input.account.painPoints,
+    contentDirections: input.account.contentDirections,
+    businessGoals: input.account.businessGoals,
+    monetization: input.account.monetization,
+    referenceAccounts: input.account.referenceAccounts,
+    materialCondition: input.account.materialCondition,
+    taboos: input.account.taboos,
+    profilePath: input.account.profilePath,
+    assetsPath: input.account.assetsPath
+  };
+  const dedupRequirements = recentTopicGroups.length
+    ? `
+- “最近两周历史主题”只用于排除重复，不是选题示例；不要复用或改写这些标题。
+- 新任务的 topicTitle 不得与历史主题完全相同，也不得只是同一具体主题的近义改写、语序调整或标题包装。
+- 内容栏目和内容类型可以重复，但具体对象、问题、场景或切入角度必须明显不同；同一大方向需要改用进阶、对比、细分场景或不同用户问题。`
+    : "";
   const prompt = `请根据账号策略、本周目标和素材情况，生成一周小红书 note_tasks。
 
 要求：
 - 生成 ${input.fallbackTasks.length} 篇。
+- 必须优先阅读并遵循输入中的完整 strategy；账号定位、人设、目标用户、内容栏目、标题封面策略、商业化路径和风险边界都应以 strategy 为主要依据，不能只依据账号类型套用通用模板。
+- 如果 weeklyInput.weeklyFocus 非空，它代表用户主动指定的本周重点，应作为本周选题的最高优先级；围绕该重点拆分具体且不重复的任务，同时不得违背 strategy 中的真实性和风险边界。
+- 如果 weeklyInput.weeklyFocus 为空，则以完整 strategy 和本周运营目标为主要依据生成选题。
 - 当前执行模式是只生成计划、Prompt 和命令建议，不允许真实发布或互动。
 - 每篇任务必须具体到用户痛点、核心观点、正文结构、图片要求、评论区钩子。
 - 推荐素材只能来自输入素材或明确写“素材缺口”，禁止伪造真实素材。
-- 只返回 JSON，不要 Markdown 代码块。
+- 只返回 JSON，不要 Markdown 代码块。${dedupRequirements}
 
 输入：
 ${JSON.stringify(
   {
-    account: input.account,
+    account: accountContext,
     strategy: input.strategy,
     assets: input.assets.map((asset) => ({
       filePath: asset.filePath,
@@ -261,8 +305,8 @@ ${JSON.stringify(
       riskNotes: asset.riskNotes
     })),
     weeklyPlan: input.weeklyPlan,
-    weeklyInput: input.weeklyInput,
-    fallbackTasks: input.fallbackTasks
+    weeklyInput: weeklyInputContext,
+    recentTwoWeeksTopics: recentTopicGroups
   },
   null,
   2
@@ -348,6 +392,8 @@ export async function summarizeReferenceResearchWithLlm(input: {
 - 不得把参考账号内容、素材、经历伪装成我方原创真实体验。
 - 输出必须服务于生成我方账号的人设文件和策划案。
 - 必须优先提炼全国同类型爆款/高互动样本的规律；账号所在城市或本地样本只作为落地差异补充，不能让整体风格和内容策略被本地样本局限。
+- 必须保留研究报告中的爆款帖子作者信息、关注数、作者定位和图片风格分析。
+- 不得补造、推测或要求评论区结论；本次研究不使用评论数据。
 - 只返回 JSON，不要 Markdown 代码块。
 
 我方账号：
@@ -361,8 +407,8 @@ ${input.rawResults}
 
 JSON 字段：
 {
-  "summaryMarkdown": "# 参考账号研究总结 Markdown，包含候选账号、内容特色、标题封面、互动、评论痛点、可借鉴点、差异化机会、风险",
-  "contentFeatures": "参考账号内容特色总结",
+  "summaryMarkdown": "# 参考账号研究总结 Markdown，包含候选爆款帖子、作者研究、标题正文、图片风格、互动引导、可借鉴点、差异化机会、风险",
+  "contentFeatures": "爆款帖标题正文、作者定位、图片风格和互动引导总结",
   "personaInsights": "对我方账号人设设定的建议",
   "strategyInsights": "对我方内容栏目、标题、封面、增长、商业化路径的建议"
 }`;
