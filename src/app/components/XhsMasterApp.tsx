@@ -3623,7 +3623,7 @@ function ImagesPanel(props: {
   const isWedding = isWeddingUiAccount(selected);
   const commandList = [...(batchImagePostResult?.commands || []), ...(result?.commands || [])];
   const [weddingPlanningGoal, setWeddingPlanningGoal] = useState(weddingPlanningGoalPresets[0].value);
-  const [imageWorkflowMode, setImageWorkflowMode] = useState<"batch" | "single">("batch");
+  const [imageWorkflowMode, setImageWorkflowMode] = useState<"batch" | "single">("single");
   const [singleSourceMode, setSingleSourceMode] = useState<SingleImageSourceMode>("ai_auto_select");
   const [singleImageGoal, setSingleImageGoal] = useState("围绕这篇笔记内容，生成封面、图集顺序、图上文字、正文结构和风险核验。");
   const [singleImageCount, setSingleImageCount] = useState("5");
@@ -3692,8 +3692,8 @@ function ImagesPanel(props: {
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             {[
-              ["batch", "批量自动模式", "给一批图片，直接生成一周或两周的多篇帖子。"],
-              ["single", "单篇精修模式", "先确定一篇笔记，再处理这一篇的图片、图集顺序和正文。"]
+              ["single", "单篇精修模式", "先确定一篇笔记，再处理这一篇的图片、图集顺序和正文。"],
+              ["batch", "批量自动模式", "给一批图片，直接生成一周或两周的多篇帖子。"]
             ].map(([mode, title, desc]) => (
               <button
                 key={mode}
