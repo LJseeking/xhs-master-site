@@ -437,7 +437,7 @@ export async function generateImageRefinementPlanWithLlm(input: {
 - 如果素材信息不足，使用保守精修，不得补造具体事实。
 - 素材标签只作为策划参考，执行端以指定原图为准；不得要求执行端比较标签后停止任务。
 - reviewNotes 只写事实信息和成品效果的必要核验项，不得要求比较原图与素材标签是否一致。
-- 输出尺寸由程序固定为 1536x2048，不要自行编写 CLI 命令。
+- 输出尺寸由 CLI 统一请求为 1536x2048，不要自行编写 CLI 命令。该尺寸仅作为请求参数，不得在 reviewNotes 或 globalReviewNotes 中要求核验成品实际像素，也不得因实际像素与请求值不同而判定失败。
 
 账号和任务上下文：
 ${JSON.stringify(
@@ -525,7 +525,7 @@ export async function generateAiAuxiliaryImagePlanWithLlm(input: {
 - images 必须恰好包含 ${input.imageCount} 项，order 必须从 1 连续到 ${input.imageCount}，不得遗漏、重复或增加。
 - generationPrompt 必须是完整、明确、可单独直接传给 generate-image 的中文提示词，不能让 OpenClaw 再自行策划画面。
 - 每条 generationPrompt 必须明确：图片用途、主体与信息层级、构图、视觉风格、光线或配色、3:4 竖版构图，以及事实真实性边界。
-- 输出尺寸由 CLI 固定为 1536x2048，Prompt 中只需使用 3:4 竖版构图语言，不要编写 CLI 命令。
+- 输出尺寸由 CLI 统一请求为 1536x2048，Prompt 中只需使用 3:4 竖版构图语言，不要编写 CLI 命令。该尺寸仅作为请求参数，不得在 reviewNotes 或 globalReviewNotes 中要求核验成品实际像素，也不得因实际像素与请求值不同而判定失败。
 - 各张图片必须承担不同信息职责，并共同服务笔记叙事顺序。
 - renderMode 只能是 visual 或 info_card。普通辅助画面使用 visual；包含信息框、气泡、流程节点、标题区、要点栏位的图片必须使用 info_card。
 - info_card 必须提供非空 textBlocks 和 textEditPrompt；textEditPrompt 必须逐字包含所有 textBlocks.text，并明确要求基于生成底图使用 edit-image 完成文字排版。不得生成只有空白框、空白气泡或占位区域的最终成品。

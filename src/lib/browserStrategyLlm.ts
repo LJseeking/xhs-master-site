@@ -1,6 +1,7 @@
 import { accountTypeTemplates, getTemplateByKey } from "@/data/accountTypeTemplates";
 import { completeWithBackendAi } from "@/lib/backendAiClient";
 import { buildAccountStrategy } from "@/lib/strategy";
+import type { RecentWeeklyTopicGroup } from "@/lib/weeklyTopicHistory";
 
 type ClientAccountInput = {
   id?: number;
@@ -59,6 +60,8 @@ type WeeklyPlanInput = {
   interactionGoal: string;
   availableAssets: string;
   taboos: string;
+  weeklyFocus?: string;
+  recentTopicGroups?: RecentWeeklyTopicGroup[];
 };
 
 function getBrowserLlmStatus() {
@@ -309,24 +312,65 @@ export async function generateWeeklyTasksWithBrowserLlm(input: {
     return { usedLlm: false, data: input.fallbackTasks, error: "AI 未启用，已使用内置模板生成。" };
   }
 
+  const recentTopicGroups = input.weeklyInput.recentTopicGroups || [];
+  const weeklyInputContext = {
+    theme: input.weeklyInput.theme,
+    goal: input.weeklyInput.goal,
+    frequency: input.weeklyInput.frequency,
+    ratio: input.weeklyInput.ratio,
+    testHypothesis: input.weeklyInput.testHypothesis,
+    commercializationMove: input.weeklyInput.commercializationMove,
+    interactionGoal: input.weeklyInput.interactionGoal,
+    availableAssets: input.weeklyInput.availableAssets,
+    taboos: input.weeklyInput.taboos,
+    weeklyFocus: input.weeklyInput.weeklyFocus
+  };
+  const dedupRequirements = recentTopicGroups.length
+    ? `
+- “最近两周历史主题”只用于排除重复，不是选题示例；不要复用或改写这些标题。
+- 新任务的 topicTitle 不得与历史主题完全相同，也不得只是同一具体主题的近义改写、语序调整或标题包装。
+- 内容栏目和内容类型可以重复，但具体对象、问题、场景或切入角度必须明显不同；同一大方向需要改用进阶、对比、细分场景或不同用户问题。`
+    : "";
+  const accountContext = {
+    id: input.account.id,
+    name: input.account.name,
+    accountParam: input.account.accountParam,
+    accountType: input.account.accountType,
+    stage: input.account.stage,
+    personaBase: input.account.personaBase,
+    city: input.account.city,
+    targetUsers: input.account.targetUsers,
+    painPoints: input.account.painPoints,
+    contentDirections: input.account.contentDirections,
+    businessGoals: input.account.businessGoals,
+    monetization: input.account.monetization,
+    referenceAccounts: input.account.referenceAccounts,
+    materialCondition: input.account.materialCondition,
+    taboos: input.account.taboos,
+    profilePath: input.account.profilePath,
+    assetsPath: input.account.assetsPath
+  };
   const prompt = `请根据账号策略、本周目标和素材情况，生成一周小红书 note_tasks。
 
 要求：
 - 生成 ${input.fallbackTasks.length} 篇。
+- 必须优先阅读并遵循输入中的完整 strategy；账号定位、人设、目标用户、内容栏目、标题封面策略、商业化路径和风险边界都应以 strategy 为主要依据，不能只依据账号类型套用通用模板。
+- 如果 weeklyInput.weeklyFocus 非空，它代表用户主动指定的本周重点，应作为本周选题的最高优先级；围绕该重点拆分具体且不重复的任务，同时不得违背 strategy 中的真实性和风险边界。
+- 如果 weeklyInput.weeklyFocus 为空，则以完整 strategy 和本周运营目标为主要依据生成选题。
 - 当前执行模式是只生成计划、Prompt 和命令建议，不允许真实发布或互动。
 - 每篇任务必须具体到用户痛点、核心观点、正文结构、图片要求、评论区钩子。
 - 推荐素材只能来自输入素材或明确写“素材缺口”，禁止伪造真实素材。
-- 只返回 JSON，不要 Markdown 代码块。
+- 只返回 JSON，不要 Markdown 代码块。${dedupRequirements}
 
 输入：
 ${JSON.stringify(
     {
-      account: input.account,
+      account: accountContext,
       strategy: input.strategy,
       assets: input.assets,
       weeklyPlan: input.weeklyPlan,
-      weeklyInput: input.weeklyInput,
-      fallbackTasks: input.fallbackTasks
+      weeklyInput: weeklyInputContext,
+      recentTwoWeeksTopics: recentTopicGroups
     },
     null,
     2

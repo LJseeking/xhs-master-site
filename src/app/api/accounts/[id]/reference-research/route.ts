@@ -4,11 +4,7 @@ import { createAsyncRouteTask, getAsyncRouteTask } from "@/lib/asyncRouteTask";
 import { buildAccountStrategy } from "@/lib/strategy";
 import { regenerateStrategyFromReferenceResearchWithLlm, summarizeReferenceResearchWithLlm } from "@/lib/llm";
 import { getTemplateByKey } from "@/data/accountTypeTemplates";
-import {
-  buildReferenceResearchCommands,
-  buildReferenceResearchKeywords,
-  buildReferenceResearchPrompt
-} from "@/lib/referenceResearch";
+import { buildReferenceResearchPrompt } from "@/lib/referenceResearch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -100,8 +96,8 @@ async function buildReferenceResearchResult(body: z.infer<typeof bodySchema>) {
   const research = {
     id: body.researchId || Date.now(),
     accountId: account.id,
-    searchKeywords: buildReferenceResearchKeywords(account as never, template as never),
-    commandJson: JSON.stringify(buildReferenceResearchCommands(account as never, template as never), null, 2),
+    searchKeywords: "",
+    commandJson: "[]",
     researchPrompt: buildReferenceResearchPrompt(account as never, template as never),
     rawResults,
     selectedAccounts,
@@ -200,13 +196,12 @@ export async function POST(request: Request) {
     };
 
     if (body.action === "prepare") {
-      const commands = buildReferenceResearchCommands(account as never, template as never);
       const researchPrompt = buildReferenceResearchPrompt(account as never, template as never);
       const research = {
         id: body.researchId || Date.now(),
         accountId: account.id,
-        searchKeywords: buildReferenceResearchKeywords(account as never, template as never),
-        commandJson: JSON.stringify(commands, null, 2),
+        searchKeywords: "",
+        commandJson: "[]",
         researchPrompt,
         rawResults: "",
         selectedAccounts: "",
@@ -216,7 +211,7 @@ export async function POST(request: Request) {
         strategyInsights: "",
         status: "待搜索"
       };
-      return NextResponse.json({ research, commands, researchPrompt });
+      return NextResponse.json({ research, commands: [], researchPrompt });
     }
 
     const task = createAsyncRouteTask(() => buildReferenceResearchResult(body));

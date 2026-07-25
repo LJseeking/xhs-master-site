@@ -1,56 +1,21 @@
 import type { Account, AccountTypeTemplate } from "@/types/domain";
 
-function q(value: string) {
-  return JSON.stringify(value);
-}
-
-export function buildReferenceResearchKeywords(account: Account, template: AccountTypeTemplate) {
-  const pieces = [
-    "全国",
-    "爆款",
-    "高互动",
-    template.name,
-    account.targetUsers,
-    account.contentDirections,
-    account.painPoints
-  ]
-    .flatMap((item) => item.split(/[，,、\n/]/))
-    .map((item) => item.trim())
-    .filter(Boolean);
-  return Array.from(new Set(pieces)).slice(0, 12).join(" ");
-}
-
-export function buildReferenceResearchCommands(account: Account, template: AccountTypeTemplate) {
-  const base = "uv run xiaohongshu_auto_op";
-  const accountFlag = `--account ${q(account.accountParam)}`;
-  const keyword = buildReferenceResearchKeywords(account, template);
-
-  return [
-    {
-      category: "爆款研究",
-      command: `${base} xhs-explore search --keyword ${q(keyword)} ${accountFlag} --limit 40 --include-notes --include-comments`,
-      description: "一次性只读搜索全国同类型账号、高互动爆款笔记和评论痛点；本地内容只作为补充对照。",
-      safetyNote: "只读探索命令，不发布、不互动。"
-    }
-  ];
-}
-
 export function buildReferenceResearchPrompt(account: Account, template: AccountTypeTemplate) {
-  return `# 给 xiaohongshu_auto_op skill 的参考账号研究 Prompt
+  return `# 给 OpenClaw 的爆款研究任务
 
 ## 当前执行模式
 只读研究，不允许真实发布、评论、点赞、收藏、关注或私信。
 
-## 账号参数
---account ${account.accountParam}
+请使用 **xiaohongshu_auto_op** 的 **xhs-explore** skill 完成本任务。请根据当前安装版本自行拟定并执行所需命令，不要使用其他小红书搜索工具。不要执行评论读取或评论分析。
 
 ## 研究目标
-在小红书中优先搜索全国范围内「${template.name}」同类型账号和高互动爆款内容，筛选 5-10 个值得参考的账号/笔记，并总结它们的内容特色。研究结果将用于生成账号「${account.name}」的人设文件和策划案。
+在小红书中优先搜索全国范围内「${template.name}」同类型高点赞图文内容，筛选并研究 10-15 篇最近半年内发布的代表性帖子，同时进入这些爆款帖作者的主页进行作者研究。研究结果将用于生成账号「${account.name}」的人设文件和策划案。
 
-重要原则：同行爆款分析一定不能局限在账号所在城市。必须先看全国同类型热门内容，充分吸收全国成熟账号的标题、封面、图集、评论痛点和转化方式；本地内容只能作为落地差异和用户语境的补充对照，不能作为主要风格样本。
+重要原则：同行爆款分析一定不能局限在账号所在城市。必须先看全国同类型热门内容，充分吸收全国成熟账号的标题、正文、封面、图集、作者定位和转化方式；本地内容只能作为落地差异和用户语境的补充对照，不能作为主要风格样本。
 
 ## 我方账号基础信息
 - 账号名称：${account.name}
+- xiaohongshu_auto_op 账号参数：${account.accountParam || "未设置"}
 - 账号类型：${template.name}
 - 阶段：${account.stage}
 - 城市：${account.city || "未设置"}
@@ -61,27 +26,46 @@ export function buildReferenceResearchPrompt(account: Account, template: Account
 - 商业目标：${account.businessGoals || "待根据参考账号研究补全"}
 - 禁忌事项：${account.taboos || "遵守平台规则，不伪造体验"}
 
-## 搜索建议
-- 全国同类型爆款关键词：${buildReferenceResearchKeywords(account, template)}
-- 全国痛点爆款关键词：${[account.painPoints.split(/[，,、\n]/).find(Boolean), template.name, "全国", "爆款", "高互动"].filter(Boolean).join(" ") || template.name}
-- 本地对照关键词（仅补充）：${[account.city, template.name].filter(Boolean).join(" ") || "未设置城市，可跳过"}
+## 关键词拟定与组合搜索
+1. 先根据上述账号名称、账号类型、人设、目标用户、用户痛点、内容方向和商业目标，拟定不超过 10 个搜索关键词。
+2. 关键词应覆盖账号品类、目标用户、典型场景、核心痛点、内容方向和高点赞内容意图；使用简短实词或短词组，去掉近义重复，不强求凑满 10 个，优先保留 5-8 个高质量关键词。
+3. 先明确列出最终关键词，再将全部关键词合并为一条搜索表达式，在同一次搜索中一起使用。禁止逐个关键词分别搜索或建立多个独立结果池。
+4. 如果组合搜索后确实不足 10 篇有效帖子，可以删除过窄的修饰词并用缩短后的组合表达式重试一次，但仍不得逐词搜索。
+
+## 搜索与筛选要求
+1. 搜索范围以全国同类型内容为主，本地内容只作为补充对照。
+2. 帖子发布时间限定在最近半年以内，优先按照点赞量从高到低筛选。
+3. 最终筛选 10-15 篇图文帖子。帖子必须与我方账号类型、目标用户或内容方向明确相关，标题和正文信息完整，并尽量避免全部来自同一个作者。
+4. 对每篇入选帖子读取帖子详情，只研究标题、正文、发布时间、点赞量等公开互动数据和图片，不加载评论，不研究评论区。
+5. 对每位不同作者进入一次主页；同一作者有多篇入选时不要重复进入。记录作者昵称、主页信息、简介、关注数，以及主页能够获取到的粉丝数和主要内容方向。
+
+## 图片风格学习
+1. 对全部 10-15 篇入选帖子，分别获取并下载每篇帖子的前三张图片；不足三张时下载该帖全部图片。
+2. 使用 OpenClaw 的视觉能力逐篇分析这些图片，不要只根据图片 URL、文件名或帖子正文推测画面。
+3. 重点分析封面主体、构图、色彩与光线、真实拍摄感、图上文字与排版、前三张图片的顺序和分工，以及图片与标题、正文之间的配合。
+4. 总结不同帖子之间可复用的视觉规律，同时指出容易同质化、误导或不适合我方账号照搬的视觉套路。
+5. 下载的图片只用于本次研究，不得作为我方真实素材发布。
 
 ## 请返回
-1. 候选参考账号列表：账号名、主页 URL、粉丝量/互动情况、适合参考的原因
-2. 每个账号的内容栏目
-3. 每个账号的标题风格
-4. 每个账号的封面风格
-5. 每个账号的互动方式
-6. 爆款/高互动笔记的共同点
-7. 用户评论里反复出现的痛点
-8. 我方账号可以借鉴的部分
-9. 我方账号必须避免同质化的部分
-10. 对人设、栏目、标题、封面、商业化路径的建议
-11. 全国爆款可借鉴规律 vs 本地落地差异：明确哪些结论来自全国高互动样本，哪些只是本地对照，不要让本地样本限制整体风格。
+1. 实际使用的关键词及最终组合搜索表达式
+2. 10-15 篇候选爆款帖子清单：标题、帖子 URL、作者、发布时间、点赞量、入选原因
+3. 爆款帖子作者研究：作者昵称、主页信息、简介、关注数、可获取的粉丝数、主要内容方向、内容垂直度，以及爆款帖子与作者日常内容的关系
+4. 标题风格分析
+5. 正文结构、开场方式和表达语气
+6. 正文中的互动引导和重点解决的用户痛点
+7. 图片风格综合分析
+8. 每篇候选帖前三张图片的逐篇视觉分析
+9. 标题、正文与图片的协同规律
+10. 爆款/高点赞笔记的共同点
+11. 我方账号可以借鉴的部分
+12. 我方账号必须避免同质化的部分
+13. 对人设、栏目、标题、封面、商业化路径的建议
+14. 全国爆款可借鉴规律 vs 本地落地差异：明确哪些结论来自全国高点赞样本，哪些只是本地对照，不要让本地样本限制整体风格。
 
 ## 约束
 - 不要编造搜索不到的数据。
 - 如果某项数据缺失，请写“未获取到”。
+- 不读取、不引用、不推测任何帖子评论内容。
 - 网络参考素材只允许用于分析，不允许作为我方真实素材发布。
 - 输出研究报告即可，不执行任何账号操作。`;
 }
@@ -98,8 +82,8 @@ ${excerpt || "暂无原始结果。"}
 
 ## 使用建议
 - 请检查 AI 服务是否可用后重新总结，或手工整理参考账号内容特色。
-- 生成策划案时应重点参考账号栏目、标题、封面、评论痛点和差异化机会。`,
-    contentFeatures: "待补充：参考账号内容栏目、标题、封面、互动方式。",
+- 生成策划案时应重点参考帖子标题、正文、作者定位、图片风格和差异化机会。`,
+    contentFeatures: "待补充：爆款帖子标题、正文、作者定位、图片风格和互动引导。",
     personaInsights: "待补充：参考账号人设表达与可差异化人设方向。",
     strategyInsights: "待补充：基于参考账号研究更新策划案。"
   };

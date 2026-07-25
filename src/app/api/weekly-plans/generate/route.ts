@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { buildNoteTasks, clampWeeklyFrequency, normalizeWeeklyRatio } from "@/lib/weeklyPlan";
 import { generateWeeklyTasksWithLlm } from "@/lib/llm";
+import { collectRecentWeeklyTopicGroups } from "@/lib/weeklyTopicHistory";
 
 export async function POST(request: Request) {
   const body = await request.json();
@@ -27,8 +28,17 @@ export async function POST(request: Request) {
     updatedAt: new Date()
   };
 
-  const weeklyInput = { ...body, frequency, ratio };
-  const fallbackTasks = buildNoteTasks(account, account.strategy, account.assets || [], weeklyInput, plan);
+  const weeklyFocus = String(body.weeklyFocus || "").trim();
+  const fallbackWeeklyInput = { ...body, frequency, ratio };
+  const recentTopicGroups = weeklyFocus
+    ? []
+    : collectRecentWeeklyTopicGroups(account.weeklyPlans || [], plan.weekStart);
+  const weeklyInput = {
+    ...fallbackWeeklyInput,
+    weeklyFocus,
+    recentTopicGroups
+  };
+  const fallbackTasks = buildNoteTasks(account, account.strategy, account.assets || [], fallbackWeeklyInput, plan);
   const llmResult = await generateWeeklyTasksWithLlm({
     account,
     strategy: account.strategy,

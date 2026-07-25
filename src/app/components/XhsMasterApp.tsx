@@ -56,6 +56,7 @@ import { generateStrategyWithBrowserLlm, generateWeeklyTasksWithBrowserLlm } fro
 import { loadBrowserWorkspace, saveBrowserWorkspace } from "@/lib/browserWorkspace";
 import { accountTypeTemplates } from "@/data/accountTypeTemplates";
 import { buildNoteTasks, clampWeeklyFrequency, normalizeWeeklyRatio } from "@/lib/weeklyPlan";
+import { collectRecentWeeklyTopicGroups } from "@/lib/weeklyTopicHistory";
 import type React from "react";
 import clsx from "clsx";
 
@@ -1851,7 +1852,7 @@ export function XhsMasterApp() {
         taboos: String(payload.taboos || ""),
         noteTasks: []
       };
-      const weeklyInput = {
+      const fallbackWeeklyInput = {
         theme: plan.theme,
         goal: plan.goal,
         frequency: plan.frequency,
@@ -1862,7 +1863,21 @@ export function XhsMasterApp() {
         availableAssets: plan.availableAssets,
         taboos: plan.taboos
       };
-      const fallbackTasks = buildNoteTasks(selected as never, (selected.strategy as never) || null, (selected.assets || []) as never, weeklyInput, plan as never);
+      const recentTopicGroups = weeklyFocus
+        ? []
+        : collectRecentWeeklyTopicGroups(selected.weeklyPlans || [], plan.weekStart);
+      const weeklyInput = {
+        ...fallbackWeeklyInput,
+        weeklyFocus,
+        recentTopicGroups
+      };
+      const fallbackTasks = buildNoteTasks(
+        selected as never,
+        (selected.strategy as never) || null,
+        (selected.assets || []) as never,
+        fallbackWeeklyInput,
+        plan as never
+      );
       const llmResult = await generateWeeklyTasksWithBrowserLlm({
         account: selected,
         strategy: selected.strategy || null,
@@ -2954,15 +2969,10 @@ function ReferenceResearchPanel(props: {
   if (!selected) return <EmptyState />;
 
   const latest = draft.research || selected.referenceResearches?.[0];
-  const commands = draft.commands || (latest?.commandJson ? safeJsonArray(latest.commandJson) : []);
   const researchPrompt = draft.researchPrompt || latest?.researchPrompt || "";
   const summaryMarkdown = draft.summary?.summaryMarkdown || latest?.summaryMarkdown || "";
-  const commandBundle = commands.map((command: any) => command.command).join("\n");
-  const taskBrief = commands
-    .map((command: any) => [command.category, command.description, command.safetyNote].filter(Boolean).join("｜"))
-    .join("\n");
-  const researchTask = [taskBrief ? `# 爆款研究任务说明\n${taskBrief}` : "", commandBundle, researchPrompt].filter(Boolean).join("\n\n");
-  const hasSearchPack = Boolean(commands.length || researchPrompt);
+  const researchTask = researchPrompt;
+  const hasSearchPack = Boolean(researchPrompt);
   const hasSummary = Boolean(summaryMarkdown.trim());
 
   return (
@@ -2972,7 +2982,7 @@ function ReferenceResearchPanel(props: {
           <div>
             <h2 className="section-title">爆款研究</h2>
             <p className="mt-1 max-w-3xl text-sm text-ink/60">
-              账号创建后策划已经可用；这页用于吸收全国同类型爆款风格、标题结构、图片顺序和评论痛点。本地内容只作为落地差异补充，避免风格被所在城市局限。
+              账号创建后策划已经可用；这页用于吸收全国同类型爆款风格、标题正文、图片顺序和作者定位。本地内容只作为落地差异补充，避免风格被所在城市局限。
             </p>
           </div>
           <button type="button" onClick={prepareReferenceResearch} disabled={loading} className="primary-button">
@@ -2989,7 +2999,7 @@ function ReferenceResearchPanel(props: {
           <div className={clsx("rounded border p-4", latest?.rawResults ? "border-teal/30 bg-teal/5" : "border-ink/10 bg-white")}>
             <div className="text-xs font-medium text-ink/55">2. 返回结果</div>
             <div className="mt-2 font-semibold">{latest?.rawResults ? "已粘贴" : "待粘贴"}</div>
-            <p className="mt-2 text-sm text-ink/60">把搜索、主页和评论分析结果粘回右侧输入区。</p>
+            <p className="mt-2 text-sm text-ink/60">把帖子详情、作者主页和图片分析结果粘回右侧输入区。</p>
           </div>
           <div className={clsx("rounded border p-4", hasSummary ? "border-teal/30 bg-teal/5" : "border-ink/10 bg-white")}>
             <div className="text-xs font-medium text-ink/55">3. 增强策划</div>
@@ -2998,12 +3008,6 @@ function ReferenceResearchPanel(props: {
           </div>
         </div>
 
-        {latest?.searchKeywords && (
-          <div className="mt-4 rounded border border-ink/10 bg-white px-3 py-2 text-sm text-ink/70">
-            <span className="font-medium text-ink">搜索关键词：</span>
-            {latest.searchKeywords}
-          </div>
-        )}
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
@@ -3052,7 +3056,7 @@ function ReferenceResearchPanel(props: {
                 name="rawResults"
                 defaultValue={latest?.rawResults || ""}
                 rows={12}
-                placeholder="粘贴 xhs-explore search、user-profile、评论分析等返回内容"
+                placeholder="粘贴 xhs-explore 返回的帖子详情、作者主页和图片分析报告"
               />
             </label>
           </div>
@@ -3401,7 +3405,7 @@ function WeeklyPanel({
           <div className={clsx("rounded border p-4", hasResearch ? "border-teal/30 bg-teal/5" : "border-ink/10 bg-white")}>
             <div className="text-xs font-medium text-ink/55">竞品账号研究</div>
             <div className="mt-2 font-semibold">{hasResearch ? "已总结" : "可先补充"}</div>
-            <p className="mt-2 text-sm text-ink/60">用于借鉴同类型账号的图片、标题结构和评论痛点，并避免同质化。</p>
+            <p className="mt-2 text-sm text-ink/60">用于借鉴同类型爆款帖的作者定位、标题正文和图片风格，并避免同质化。</p>
           </div>
           <div className={clsx("rounded border p-4", assetCount ? "border-teal/30 bg-teal/5" : "border-ink/10 bg-white")}>
             <div className="text-xs font-medium text-ink/55">素材库</div>
@@ -3466,7 +3470,12 @@ function WeeklyPanel({
           </div>
 
           <div className="mt-4 rounded border border-ink/10 bg-white p-3">
-            <Textarea name="weeklyFocus" label={focusCopy.label} placeholder={focusCopy.placeholder} help={focusCopy.help} />
+            <Textarea
+              name="weeklyFocus"
+              label={focusCopy.label}
+              placeholder={focusCopy.placeholder}
+              help={`${focusCopy.help} 填写后按本周指定内容生成；留空时会避开最近两周已生成计划的主题。`}
+            />
             <input type="hidden" name="theme" value={combinedPreset.theme} readOnly />
             <input type="hidden" name="goal" value={combinedPreset.goal} readOnly />
             <input type="hidden" name="ratio" value={normalizedRatio} readOnly />
@@ -3609,7 +3618,7 @@ function ImagesPanel(props: {
   const isWedding = isWeddingUiAccount(selected);
   const commandList = [...(batchImagePostResult?.commands || []), ...(result?.commands || [])];
   const [weddingPlanningGoal, setWeddingPlanningGoal] = useState(weddingPlanningGoalPresets[0].value);
-  const [imageWorkflowMode, setImageWorkflowMode] = useState<"batch" | "single">("batch");
+  const [imageWorkflowMode, setImageWorkflowMode] = useState<"batch" | "single">("single");
   const [singleSourceMode, setSingleSourceMode] = useState<SingleImageSourceMode>("ai_auto_select");
   const [singleImageGoal, setSingleImageGoal] = useState("围绕这篇笔记内容，生成封面、图集顺序、图上文字、正文结构和风险核验。");
   const [singleImageCount, setSingleImageCount] = useState("5");
@@ -3672,8 +3681,8 @@ function ImagesPanel(props: {
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             {[
-              ["batch", "批量自动模式", "给一批图片，直接生成一周或两周的多篇帖子。"],
-              ["single", "单篇精修模式", "先确定一篇笔记，再处理这一篇的图片、图集顺序和正文。"]
+              ["single", "单篇精修模式", "先确定一篇笔记，再处理这一篇的图片、图集顺序和正文。"],
+              ["batch", "批量自动模式", "给一批图片，直接生成一周或两周的多篇帖子。"]
             ].map(([mode, title, desc]) => (
               <button
                 key={mode}
