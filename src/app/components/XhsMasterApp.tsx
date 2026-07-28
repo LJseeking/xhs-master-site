@@ -307,6 +307,34 @@ function accountUiMode(accountType?: string) {
   return "culture_tourism";
 }
 
+function defaultPersonaBase(form: ReturnType<typeof emptyAccountForm>) {
+  const name = form.name.trim() || "该账号";
+  const city = form.city.trim();
+  const localAudience = city ? `${city}及周边` : "";
+
+  switch (accountUiMode(form.accountType)) {
+    case "outdoor":
+      return `${name}面向${localAudience || "本地及周边"}徒步和骑行用户分享路线判断、真实路况和出发准备，语气自然、谨慎、具体。`;
+    case "food":
+      return `${name}面向${city ? `${city}本地及到访` : "本地及到访"}用餐用户分享真实菜品、用餐场景和到店信息，语气自然、具体、不夸张。`;
+    case "heritage":
+      return `${name}面向关注传统文化和在地体验的用户分享真实工艺、活动体验和参与方式，语气尊重、自然、具体。`;
+    case "stay":
+      return `${name}面向计划前往${city || "当地"}住宿的用户分享真实房型、入住体验和周边玩法，语气自然、谨慎、具体。`;
+    case "museum":
+      return `${name}面向观展和亲子研学用户分享展览看点、参观动线和预约信息，语气清楚、自然、具体。`;
+    case "product":
+      return `${name}面向关注地域产品和文创的用户分享真实产品、产地工艺和购买建议，语气自然、具体、有边界。`;
+    case "service":
+      if (form.accountType === "wedding_planning") {
+        return `${name}面向备婚用户分享真实婚礼案例、布置细节和落地建议，语气自然、审美具体、不夸张。`;
+      }
+      return `${name}面向${city ? `${city}本地` : "本地"}有明确服务需求的用户分享真实服务项目、服务流程和预约边界，语气自然、具体、可信。`;
+    default:
+      return `${name}面向${localAudience || "本地及周边"}出行用户分享真实目的地体验、游览动线和出发信息，语气自然、具体、有边界。`;
+  }
+}
+
 function isHikingUiType(accountType?: string) {
   return accountUiMode(accountType) === "outdoor";
 }
@@ -1106,10 +1134,7 @@ function switchAccountTypeForm(form: ReturnType<typeof emptyAccountForm>, templa
 function hydrateAccountForm(form: ReturnType<typeof emptyAccountForm>, templates: Template[], count = 0) {
   const template = templates.find((item) => item.typeKey === form.accountType);
   const defaults = accountTypeDefaults(form.accountType, template);
-  const typeName = template?.name || "小红书运营客户";
-  const personaBase =
-    form.personaBase.trim() ||
-    `${form.name || "该客户"}是${form.city ? `${form.city}的` : ""}${typeName}客户，需要通过真实素材、真实案例和清楚的服务信息运营小红书账号。`;
+  const personaBase = form.personaBase.trim() || defaultPersonaBase(form);
 
   return {
     ...form,
