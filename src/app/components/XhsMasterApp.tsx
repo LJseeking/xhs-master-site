@@ -254,6 +254,17 @@ type SingleImagePromptOptions = {
   imageCount?: string;
 };
 
+type GenerationControls = {
+  manageLoading?: boolean;
+  showSuccessToast?: boolean;
+  loadingAction?: string;
+};
+
+type ImagePromptGeneration = {
+  result: ImagePromptResult;
+  savedTask: NoteTask;
+};
+
 const mainTabs = [
   ["dashboard", "工作台", LayoutDashboard],
   ["accounts", "客户账号", ShieldCheck],
@@ -410,6 +421,12 @@ function isRemoteImageAsset(asset: Asset) {
   return type === "image"
     || type.startsWith("image/")
     || /\.(?:avif|gif|jpe?g|png|webp)(?:$|\?)/i.test(asset.fileUrl);
+}
+
+function inferQuickImageCount(requiredImages: string) {
+  const matched = requiredImages.match(/(\d+)\s*张/);
+  const parsed = matched ? Number.parseInt(matched[1], 10) : 5;
+  return Math.max(1, Math.min(Number.isFinite(parsed) ? parsed : 5, 9));
 }
 
 function RemoteAssetPicker(props: {
@@ -2161,14 +2178,15 @@ export function XhsMasterApp() {
     }
   }
 
-  async function generatePrompt(task: NoteTask) {
-    if (!selected || !latestPlan) return;
+  async function generatePrompt(task: NoteTask, controls: GenerationControls = {}): Promise<PromptResult | null> {
+    if (!selected || !latestPlan) return null;
     if (!task.imagePlan?.trim()) {
       showToast("请先为当前笔记生成单篇图片方案，再生成图文草稿箱指令。");
-      return;
+      return null;
     }
-    setLoading(true);
-    setLoadingAction("generatePrompt");
+    const manageLoading = controls.manageLoading ?? true;
+    if (manageLoading) setLoading(true);
+    setLoadingAction(controls.loadingAction || "generatePrompt");
     try {
       const res = await fetch(`/api/note-tasks/${task.id}/prompt`, {
         method: "POST",
@@ -2186,22 +2204,31 @@ export function XhsMasterApp() {
             : {
                 ...plan,
                 noteTasks: plan.noteTasks.map((item) => (item.id === task.id ? { ...item, status: "已生成草稿箱指令" } : item))
-              }
+          }
         )
       }));
-      showToast("图文草稿箱任务已生成。");
+      if (controls.showSuccessToast ?? true) showToast("图文草稿箱任务已生成。");
+      return data as PromptResult;
     } catch (error) {
       showToast(error instanceof Error ? error.message : "生成图文草稿箱任务失败。");
+      return null;
     } finally {
-      setLoading(false);
-      setLoadingAction(null);
+      if (manageLoading) {
+        setLoading(false);
+        setLoadingAction(null);
+      }
     }
   }
 
-  async function generateImagePrompt(task: NoteTask, options?: SingleImagePromptOptions) {
-    if (!selected || !latestPlan) return;
-    setLoading(true);
-    setLoadingAction("generateImagePrompt");
+  async function generateImagePrompt(
+    task: NoteTask,
+    options?: SingleImagePromptOptions,
+    controls: GenerationControls = {}
+  ): Promise<ImagePromptGeneration | null> {
+    if (!selected || !latestPlan) return null;
+    const manageLoading = controls.manageLoading ?? true;
+    if (manageLoading) setLoading(true);
+    setLoadingAction(controls.loadingAction || "generateImagePrompt");
     try {
       const res = await fetch(`/api/note-tasks/${task.id}/image-prompt`, {
         method: "POST",
@@ -2241,9 +2268,66 @@ export function XhsMasterApp() {
               }
         )
       }));
-      showToast("图片方案和执行命令已生成。");
+      if (controls.showSuccessToast ?? true) showToast("图片方案和执行命令已生成。");
+      return { result: resolved, savedTask };
     } catch (error) {
       showToast(error instanceof Error ? error.message : "生成图片方案失败。");
+      return null;
+    } finally {
+      if (manageLoading) {
+        setLoading(false);
+        setLoadingAction(null);
+      }
+    }
+  }
+
+  async function generateDashboardContentTasks(task: NoteTask) {
+    if (!selected || !latestPlan) return;
+    const existingImageTask = imagePromptResults[task.id]?.openclawTask?.content
+      || imagePromptResults[task.id]?.imagePrompt?.content;
+    const existingDraftTask = promptResults[task.id]?.openclawTask?.content
+      || promptResults[task.id]?.prompt?.content;
+    const shouldGenerateImage = !existingImageTask || Boolean(existingDraftTask);
+
+    setLoading(true);
+    try {
+      let latestTask = task;
+      if (shouldGenerateImage) {
+        const imageCount = inferQuickImageCount(task.requiredImages || "");
+        const candidateAssets = (selected.assets || []).filter(
+          (asset) => isRemoteImageAsset(asset) && /^https?:\/\//i.test(asset.fileUrl || "")
+        );
+        if (candidateAssets.length < imageCount) {
+          showToast(`当前素材库只有 ${candidateAssets.length} 张可用图片，快捷生成需要 ${imageCount} 张。请前往图片方案调整。`);
+          return;
+        }
+
+        const imageGeneration = await generateImagePrompt(
+          task,
+          {
+            imageSourceMode: "ai_auto_select",
+            noteContent: [task.coreView, task.bodyStructure].filter(Boolean).join("\n"),
+            singleGoal: "围绕这篇笔记内容，生成封面、图集顺序、图上文字、正文结构和风险核验。",
+            imageCount: String(imageCount),
+            candidateAssets
+          },
+          {
+            manageLoading: false,
+            showSuccessToast: false,
+            loadingAction: "dashboardImagePrompt"
+          }
+        );
+        if (!imageGeneration) return;
+        latestTask = imageGeneration.savedTask;
+      }
+
+      const promptGeneration = await generatePrompt(latestTask, {
+        manageLoading: false,
+        showSuccessToast: false,
+        loadingAction: "dashboardDraftPrompt"
+      });
+      if (!promptGeneration) return;
+      showToast("图片方案和图文草稿箱指令已生成。");
     } finally {
       setLoading(false);
       setLoadingAction(null);
@@ -2625,7 +2709,22 @@ export function XhsMasterApp() {
 
         <section className="px-4 py-6 lg:px-8">
           {toast && <div className="fixed right-5 top-5 z-50 rounded bg-ink px-4 py-2 text-sm text-white shadow-panel">{toast}</div>}
-          {activeTab === "dashboard" && <Dashboard selected={selected} setActiveTab={setActiveTab} deleteAccount={deleteAccount} loading={loading} />}
+          {activeTab === "dashboard" && (
+            <Dashboard
+              selected={selected}
+              plan={latestPlan}
+              selectedNoteId={selectedNote?.id ?? null}
+              setSelectedNoteId={setSelectedNoteId}
+              promptResults={promptResults}
+              imagePromptResults={imagePromptResults}
+              generateContentTasks={generateDashboardContentTasks}
+              copy={copy}
+              setActiveTab={setActiveTab}
+              deleteAccount={deleteAccount}
+              loading={loading}
+              loadingAction={loadingAction}
+            />
+          )}
           {activeTab === "accounts" && (
             <AccountsPanel
               templates={templates}
@@ -2758,14 +2857,30 @@ export function XhsMasterApp() {
 
 function Dashboard({
   selected,
+  plan,
+  selectedNoteId,
+  setSelectedNoteId,
+  promptResults,
+  imagePromptResults,
+  generateContentTasks,
+  copy,
   setActiveTab,
   deleteAccount,
-  loading
+  loading,
+  loadingAction
 }: {
   selected?: Account;
+  plan?: WeeklyPlan;
+  selectedNoteId: number | null;
+  setSelectedNoteId: (id: number) => void;
+  promptResults: Record<number, PromptResult>;
+  imagePromptResults: Record<number, ImagePromptResult>;
+  generateContentTasks: (task: NoteTask) => Promise<void>;
+  copy: (text: string) => void;
   setActiveTab: (tab: any) => void;
   deleteAccount: () => void;
   loading: boolean;
+  loadingAction: string | null;
 }) {
   const cards = [
     ["账号策划", selected?.strategy ? "已可用" : "待创建", "strategy"],
@@ -2779,6 +2894,28 @@ function Dashboard({
     ["爆款研究", selected?.referenceResearches?.[0]?.status || "可选增强", "reference"],
     ["配置文件", selected?.profile ? `v${selected.profile.version}` : "自动生成", "agents"]
   ];
+  const currentNote = plan?.noteTasks.find((task) => task.id === selectedNoteId) ?? plan?.noteTasks?.[0];
+  const currentImageResult = currentNote ? imagePromptResults[currentNote.id] : null;
+  const currentPromptResult = currentNote ? promptResults[currentNote.id] : null;
+  const imageTaskContent = currentImageResult?.openclawTask?.content || currentImageResult?.imagePrompt?.content || "";
+  const draftTaskContent = currentPromptResult?.openclawTask?.content || currentPromptResult?.prompt?.content || "";
+  const hasImagePlan = Boolean(currentNote?.imagePlan?.trim() || imageTaskContent);
+  const hasDraftTask = Boolean(draftTaskContent);
+  const isQuickGenerating = loadingAction === "dashboardImagePrompt" || loadingAction === "dashboardDraftPrompt";
+  const generateButtonText = hasImagePlan && hasDraftTask
+    ? "重新生成图片方案 + 文字方案"
+    : hasImagePlan
+      ? "生成文字方案"
+      : "生成图片方案 + 文字方案";
+  const generateLoadingText = loadingAction === "dashboardDraftPrompt"
+    ? "正在生成文字方案..."
+    : "正在生成图片方案...";
+
+  function openImageSetup() {
+    if (currentNote) setSelectedNoteId(currentNote.id);
+    setActiveTab("images");
+  }
+
   return (
     <div className="mx-auto max-w-[1480px] space-y-5">
       <div className="panel flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -2826,18 +2963,176 @@ function Dashboard({
           ))}
         </div>
       </div>
-      <div className="panel">
-        <div className="mb-3 flex items-center gap-2 text-lg font-semibold">
-          <ShieldCheck size={20} /> 统一执行原则
+      <section className="space-y-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="section-title">本周内容 + 发布</h2>
+            {plan?.noteTasks?.length ? (
+              <span className="rounded bg-teal/10 px-2.5 py-1 text-xs font-medium text-teal">
+                共 {plan.noteTasks.length} 篇
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-1 text-sm text-ink/60">选择一篇本周笔记，生成可直接交给 OpenClaw 的图片任务和图文草稿箱任务。</p>
         </div>
-        <div className="grid gap-3 text-sm text-ink/75 md:grid-cols-2">
-          {["只生成草稿和执行建议", "默认安全模式", "不直接执行真实发布", "按账号类型切换图片规则", "AI 改图必须基于真实素材", "不伪造亲历、探店、轨迹、顾客反馈或素材授权"].map((item) => (
-            <div key={item} className="rounded border border-ink/10 bg-white px-3 py-2">
-              {item}
+
+        {!selected ? (
+          <div className="panel">
+            <EmptyState text="还没有客户账号，请先创建账号并生成策划。" />
+            <button type="button" onClick={() => setActiveTab("accounts")} className="primary-button mx-auto mt-4">
+              <Plus size={17} /> 新增账号
+            </button>
+          </div>
+        ) : !plan?.noteTasks?.length || !currentNote ? (
+          <div className="panel">
+            <EmptyState text="当前账号还没有本周内容，请先生成一周计划。" />
+            <button type="button" onClick={() => setActiveTab("weekly")} className="primary-button mx-auto mt-4">
+              <CalendarDays size={17} /> 前往本周内容
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,42fr)_minmax(0,58fr)]">
+              <div className="panel min-w-0">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold">本周笔记</h3>
+                    <p className="mt-1 text-sm text-ink/55">按发布时间查看并选择要处理的内容。</p>
+                  </div>
+                  <CalendarDays size={20} className="shrink-0 text-teal" />
+                </div>
+                <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1">
+                  {plan.noteTasks.map((task) => {
+                    const taskImageContent = imagePromptResults[task.id]?.openclawTask?.content
+                      || imagePromptResults[task.id]?.imagePrompt?.content;
+                    const taskDraftContent = promptResults[task.id]?.openclawTask?.content
+                      || promptResults[task.id]?.prompt?.content;
+                    const taskHasImage = Boolean(task.imagePlan?.trim() || taskImageContent);
+                    const taskHasDraft = Boolean(taskDraftContent);
+                    const status = taskHasImage && taskHasDraft ? "已就绪" : taskHasImage ? "待生成文字" : "待生成";
+                    return (
+                      <button
+                        key={task.id}
+                        type="button"
+                        onClick={() => setSelectedNoteId(task.id)}
+                        className={clsx(
+                          "w-full rounded border p-4 text-left transition",
+                          task.id === currentNote.id
+                            ? "border-teal bg-teal/10 ring-2 ring-teal/10"
+                            : "border-ink/10 bg-white hover:border-teal/40"
+                        )}
+                      >
+                        <div className="flex items-start gap-3">
+                          <span className={clsx(
+                            "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
+                            task.id === currentNote.id ? "border-teal" : "border-ink/25"
+                          )}>
+                            {task.id === currentNote.id ? <span className="h-2.5 w-2.5 rounded-full bg-teal" /> : null}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block font-medium leading-6">{task.topicTitle}</span>
+                            <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-ink/55">
+                              <span>{task.publishAt}</span>
+                              <span>{task.contentType}</span>
+                              <span>{task.expectedGoal || task.contentGoal}</span>
+                            </span>
+                          </span>
+                          <span className={clsx(
+                            "shrink-0 rounded px-2 py-1 text-xs font-medium",
+                            taskHasDraft ? "bg-teal/10 text-teal" : taskHasImage ? "bg-amber-50 text-amber-700" : "bg-coral/10 text-coral"
+                          )}>
+                            {status}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="panel min-w-0">
+                <div className="border-b border-ink/10 pb-4">
+                  <div className="text-sm font-medium text-ink/55">当前笔记</div>
+                  <h3 className="mt-2 text-xl font-semibold leading-8">{currentNote.topicTitle}</h3>
+                  <div className="mt-3 grid gap-2 text-sm text-ink/65 sm:grid-cols-2">
+                    <div className="flex items-center gap-2">
+                      <CalendarDays size={16} className="text-teal" />
+                      <span>{currentNote.publishAt}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <FileText size={16} className="text-teal" />
+                      <span>{currentNote.contentGoal || currentNote.expectedGoal}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <ImageIcon size={16} className={hasImagePlan ? "text-teal" : "text-ink/35"} />
+                      <span>图片方案：{hasImagePlan ? "已生成" : "待生成"}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <NotebookPen size={16} className={hasDraftTask ? "text-teal" : "text-ink/35"} />
+                      <span>文字方案：{hasDraftTask ? "已生成" : "待生成"}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => void generateContentTasks(currentNote)}
+                  disabled={loading}
+                  aria-busy={isQuickGenerating}
+                  className="primary-button mt-5 w-full justify-center"
+                >
+                  <ActionButtonContent
+                    loading={isQuickGenerating}
+                    icon={<Sparkles size={17} />}
+                    idleText={generateButtonText}
+                    loadingText={generateLoadingText}
+                  />
+                </button>
+                <p className="mt-2 text-xs leading-5 text-ink/55">
+                  快捷生成默认使用 AI 自动选图；图片完成后才会继续生成文字方案。
+                </p>
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => copy(imageTaskContent)}
+                    disabled={!imageTaskContent || loading}
+                    className="secondary-button w-full justify-center"
+                  >
+                    <ImageIcon size={17} /> 复制图片方案
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => copy(draftTaskContent)}
+                    disabled={!draftTaskContent || loading}
+                    className="secondary-button w-full justify-center"
+                  >
+                    <FileText size={17} /> 复制文字方案
+                  </button>
+                </div>
+
+                <button type="button" onClick={openImageSetup} className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-teal hover:underline">
+                  <ExternalLink size={16} /> 调整图片来源、数量或精修要求
+                </button>
+
+                {hasImagePlan && hasDraftTask ? (
+                  <div className="mt-5 rounded border border-teal/20 bg-teal/5 p-3 text-sm leading-6 text-teal">
+                    两项任务已就绪。先把图片方案交给 OpenClaw；图片完成后，再发送文字方案生成图文笔记并保存到草稿箱。
+                  </div>
+                ) : null}
+              </div>
             </div>
-          ))}
-        </div>
-      </div>
+
+            <div className="grid gap-2 rounded border border-ink/10 bg-white/60 p-3 text-sm text-ink/60 sm:grid-cols-4">
+              {["1. 选择笔记", "2. 生成两项任务", "3. 依次复制给 OpenClaw", "4. 人工审核草稿"].map((item, index) => (
+                <div key={item} className={clsx("flex items-center gap-2 px-2 py-1", index === 0 && "font-medium text-teal")}>
+                  {item}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
     </div>
   );
 }
