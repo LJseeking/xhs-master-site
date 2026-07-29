@@ -252,6 +252,7 @@ type SingleImagePromptOptions = {
   noteContent?: string;
   singleGoal?: string;
   imageCount?: string;
+  removeWatermarks?: boolean;
 };
 
 type GenerationControls = {
@@ -2281,7 +2282,10 @@ export function XhsMasterApp() {
     }
   }
 
-  async function generateDashboardContentTasks(task: NoteTask) {
+  async function generateDashboardContentTasks(
+    task: NoteTask,
+    options: { removeWatermarks?: boolean } = {}
+  ) {
     if (!selected || !latestPlan) return;
     const existingImageTask = imagePromptResults[task.id]?.openclawTask?.content
       || imagePromptResults[task.id]?.imagePrompt?.content;
@@ -2309,7 +2313,8 @@ export function XhsMasterApp() {
             noteContent: [task.coreView, task.bodyStructure].filter(Boolean).join("\n"),
             singleGoal: "围绕这篇笔记内容，生成封面、图集顺序、图上文字、正文结构和风险核验。",
             imageCount: String(imageCount),
-            candidateAssets
+            candidateAssets,
+            removeWatermarks: Boolean(options.removeWatermarks)
           },
           {
             manageLoading: false,
@@ -2875,7 +2880,7 @@ function Dashboard({
   setSelectedNoteId: (id: number) => void;
   promptResults: Record<number, PromptResult>;
   imagePromptResults: Record<number, ImagePromptResult>;
-  generateContentTasks: (task: NoteTask) => Promise<void>;
+  generateContentTasks: (task: NoteTask, options?: { removeWatermarks?: boolean }) => Promise<void>;
   copy: (text: string) => void;
   setActiveTab: (tab: any) => void;
   deleteAccount: () => void;
@@ -3076,7 +3081,7 @@ function Dashboard({
 
                 <button
                   type="button"
-                  onClick={() => void generateContentTasks(currentNote)}
+                  onClick={() => void generateContentTasks(currentNote, { removeWatermarks: true })}
                   disabled={loading}
                   aria-busy={isQuickGenerating}
                   className="primary-button mt-5 w-full justify-center"
@@ -3089,7 +3094,7 @@ function Dashboard({
                   />
                 </button>
                 <p className="mt-2 text-xs leading-5 text-ink/55">
-                  快捷生成默认使用 AI 自动选图；图片完成后才会继续生成文字方案。
+                  快捷生成默认使用 AI 自动选图并去除水印；图片完成后才会继续生成文字方案。
                 </p>
 
                 <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -4214,6 +4219,9 @@ function ImagesPanel(props: {
                     noteContent: String(form.get("noteContent") || ""),
                     singleGoal: String(form.get("singleGoal") || ""),
                     imageCount: String(form.get("imageCount") || ""),
+                    removeWatermarks:
+                      singleSourceMode !== "ai_generate"
+                      && form.get("removeWatermarks") === "true",
                     openclawImagePaths: imagePaths,
                     candidateAssets: singleSourceMode === "ai_auto_select" ? candidateAssets : undefined,
                     selectedAssets: imageUrls.map((url, index) => selectedImageAssets.find((asset) => asset.fileUrl === url) || {
@@ -4354,6 +4362,22 @@ function ImagesPanel(props: {
                       orderable
                     />
                   </>
+                )}
+                {singleSourceMode !== "ai_generate" && (
+                  <label className="flex items-start gap-3 rounded border border-ink/10 bg-white p-3 text-sm leading-6 text-ink/70">
+                    <input
+                      type="checkbox"
+                      name="removeWatermarks"
+                      value="true"
+                      className="mt-1 h-4 w-4 shrink-0 accent-teal"
+                    />
+                    <span>
+                      <span className="block font-medium text-ink">去除图片中的水印</span>
+                      <span className="mt-0.5 block text-xs leading-5 text-ink/55">
+                        勾选后，精修任务会要求去除图片中的所有水印、账号角标和来源文字；不勾选则不做任何去水印处理。
+                      </span>
+                    </span>
+                  </label>
                 )}
                 <Textarea
                   name="singleGoal"

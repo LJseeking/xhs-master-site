@@ -250,9 +250,18 @@ function buildOpenclawTask(input: {
   imageSourceMode: string;
   openclawImagePaths: string;
   selectedAssets?: ImageRefinementAsset[];
+  removeWatermarks?: boolean;
   prompt: string;
 }) {
-  const { account, noteTask, imageSourceMode, openclawImagePaths, selectedAssets = [], prompt } = input;
+  const {
+    account,
+    noteTask,
+    imageSourceMode,
+    openclawImagePaths,
+    selectedAssets = [],
+    removeWatermarks = false,
+    prompt
+  } = input;
   const taskName = `xhs-image-task-${noteTask.id}`;
   const accountName = shellQuote(account.accountParam);
   const imageSources = nonEmptyLines(openclawImagePaths);
@@ -303,6 +312,15 @@ uv run python scripts/cli.py edit-image \\
   const commandVariables = usesExistingImages
     ? "`IMAGE_PROMPT` 必须替换为当前单张图片对应的完整精修提示词；`INPUT_IMAGE` 必须替换为 OpenClaw 下载后的本地绝对路径。"
     : "`IMAGE_PROMPT` 必须替换为当前图片对应的完整“本图生成 Prompt”并追加负向约束；`IMAGE_OUTPUT_DIR` 根据是否存在成品文字选择最终素材目录或底图目录。存在成品文字时，`BASE_IMAGE` 使用 generate-image 返回的 `local_path`，`TEXT_EDIT_PROMPT` 使用完整“本图文字编辑 Prompt”。";
+  const watermarkSection = usesExistingImages && removeWatermarks
+    ? `## 去除图片中的所有水印
+
+用户已经明确开启去水印。执行每一张图片的 \`edit-image\` 时，必须检查并去除所有类型的水印、品牌水印、账号角标、平台角标和来源文字，并根据邻近画面自然补全背景。
+
+去除后不得留下模糊块、涂抹痕迹、重复纹理、文字残影或明显修补边界。
+
+`
+    : "";
 
   return {
     title: `${noteTask.topicTitle} OpenClaw 图片执行任务`,
@@ -319,7 +337,7 @@ uv run python scripts/cli.py edit-image \\
 
 注意：\`${account.accountParam}\` 是 xiaohongshu_auto_op 的账号键。\`edit-image\` / \`generate-image\` 不依赖小红书浏览器登录账号，因此不要把它作为 \`--account\` 传给 CLI；但所有成品图必须保存到该账号的 \`assets/${account.accountParam}/\` 素材目录。
 
-## 指定图片
+${watermarkSection}## 指定图片
 ${sourceList}
 
 ## 执行步骤
@@ -428,6 +446,12 @@ async function buildImagePromptResult(body: any, requestId: string) {
   const singleGoal = String(body.singleGoal || "");
   const imageCount = String(body.imageCount || "");
   const normalizedImageCount = normalizeImageCount(imageCount);
+  const removeWatermarks =
+    imageSourceMode !== "ai_generate"
+    && (
+      body.removeWatermarks === true
+      || String(body.removeWatermarks) === "true"
+    );
   const noteTask = body.noteTask;
   const account = body.account;
   if (!noteTask || !account) throw new Error("缺少任务上下文");
@@ -574,7 +598,8 @@ async function buildImagePromptResult(body: any, requestId: string) {
       expertRules,
       assets: selectedAssets,
       baseRequirements: content,
-      selectionMode: imageSourceMode === "ai_auto_select" ? "ai_auto" : "manual"
+      selectionMode: imageSourceMode === "ai_auto_select" ? "ai_auto" : "manual",
+      removeWatermarks
     });
 
     if (!refinementResult.usedLlm) {
@@ -647,6 +672,7 @@ async function buildImagePromptResult(body: any, requestId: string) {
     imageSourceMode,
     openclawImagePaths: canonicalImagePaths,
     selectedAssets,
+    removeWatermarks,
     prompt: taskRequirements
   });
   const category = imageSourceMode === "ai_generate"
