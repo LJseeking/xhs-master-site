@@ -399,6 +399,7 @@ export async function generateImageRefinementPlanWithLlm(input: {
   assets: ImageRefinementAsset[];
   baseRequirements: string;
   selectionMode?: "manual" | "ai_auto";
+  removeWatermarks?: boolean;
 }): Promise<ImageRefinementResult> {
   const model = process.env.AI_MODEL || "gpt-5.5";
   const controller = new AbortController();
@@ -411,6 +412,10 @@ export async function generateImageRefinementPlanWithLlm(input: {
   const selectionDescription = selectionMode === "ai_auto"
     ? "后端选图 AI 已经根据候选素材标签完成选图和排序"
     : "用户已经手动完成选图和排序";
+  const watermarkRequirement = input.removeWatermarks
+    ? `
+- 用户明确要求执行去水印。逐张检查所有类型的水印、品牌水印、账号角标、平台角标和来源文字；如存在，editPrompt 必须明确要求完整去除，并根据邻近画面自然补全背景，不留下模糊块、涂抹痕迹、重复纹理、文字残影或明显修补边界。`
+    : "";
 
   try {
     const response = await completeWithBackendAi({
@@ -438,6 +443,7 @@ export async function generateImageRefinementPlanWithLlm(input: {
 - 素材标签只作为策划参考，执行端以指定原图为准；不得要求执行端比较标签后停止任务。
 - reviewNotes 只写事实信息和成品效果的必要核验项，不得要求比较原图与素材标签是否一致。
 - 输出尺寸由 CLI 统一请求为 1536x2048，不要自行编写 CLI 命令。该尺寸仅作为请求参数，不得在 reviewNotes 或 globalReviewNotes 中要求核验成品实际像素，也不得因实际像素与请求值不同而判定失败。
+${watermarkRequirement}
 
 账号和任务上下文：
 ${JSON.stringify(
@@ -485,7 +491,21 @@ ${input.baseRequirements}
     if (!plan) {
       return { usedLlm: false, error: "AI 返回的逐图精修结果不完整或无法解析，请重试。" };
     }
-    return { usedLlm: true, data: plan, model: response.model || model };
+    const resolvedPlan = input.removeWatermarks
+      ? {
+          ...plan,
+          globalEditRules: [
+            ...plan.globalEditRules,
+            "逐张检查并去除所有类型的水印、品牌水印、账号角标、平台角标和来源文字；自然补全背景，不得留下模糊块、涂抹痕迹、重复纹理、文字残影或明显修补边界。"
+          ],
+          images: plan.images.map((image) => ({
+            ...image,
+            editPrompt: `${image.editPrompt}\n检查原图中的所有类型水印、品牌水印、账号角标、平台角标和来源文字；如存在则完整去除，并根据邻近画面自然补全背景，不留下模糊块、涂抹痕迹、重复纹理、文字残影或明显修补边界。`,
+            reviewNotes: `${image.reviewNotes}；确认所有水印、账号角标、平台角标、来源文字和相关残影已经去除。`
+          }))
+        }
+      : plan;
+    return { usedLlm: true, data: resolvedPlan, model: response.model || model };
   } catch (error) {
     return { usedLlm: false, error: error instanceof Error ? error.message : "AI 调用失败。" };
   } finally {
