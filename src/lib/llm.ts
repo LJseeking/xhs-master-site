@@ -155,7 +155,6 @@ export async function regenerateStrategyFromReferenceResearchWithLlm(input: {
     personaInsights: string;
     strategyInsights: string;
     writingStyleInsights: string;
-    rawResults: string;
     selectedAccounts: string;
   };
   fallback: StrategyBundle;
@@ -217,7 +216,14 @@ JSON 字段：
 
   if (!response.ok) return { usedLlm: false, data: input.fallback, error: response.error };
 
-  const parsed = extractJson(response.text);
+  let parsed = extractJson(response.text);
+  if (!parsed) {
+    const repaired = await completeWithBackendAi({
+      instructions: "你是 JSON 格式修复器。只修复用户提供的策划案结果的 JSON 结构，不新增、删改或概括其中的策划内容。只返回一个合法 JSON 对象，不要输出 Markdown、代码围栏或解释。",
+      input: `将以下内容修复为合法 JSON 对象。根对象必须保留 positioning、strategy、markdown、agentsMdContent、execGuide 字段。\n\n待修复内容：\n${response.text.slice(0, 120_000)}`
+    });
+    if (repaired.ok) parsed = extractJson(repaired.text);
+  }
   if (!parsed || typeof parsed !== "object") {
     return { usedLlm: false, data: input.fallback, error: "OpenAI 返回内容不是可解析 JSON，未重生成策划案。" };
   }
@@ -605,13 +611,51 @@ async function createTextResponse(input: { instructions: string; input: string }
 }
 
 function extractJson(text: string): Record<string, unknown> | null {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
-  const raw = fenced || text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
+  const candidates = [
+    text.trim(),
+    ...Array.from(text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi), (match) => match[1].trim())
+  ];
+  const objects: string[] = [];
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character === "{") {
+      if (depth === 0) start = index;
+      depth += 1;
+    } else if (character === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        objects.push(text.slice(start, index + 1));
+        start = -1;
+      }
+    }
   }
+
+  for (const candidate of [...candidates, ...objects]) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Continue attempting fenced blocks and balanced JSON objects.
+    }
+  }
+  return null;
 }
 
 function readString(source: Record<string, unknown>, key: string) {

@@ -134,7 +134,6 @@ async function buildReferenceResearchResult(body: z.infer<typeof bodySchema>) {
       personaInsights: research.personaInsights,
       strategyInsights: research.strategyInsights,
       writingStyleInsights: research.writingStyleInsights,
-      rawResults: research.rawResults,
       selectedAccounts: research.selectedAccounts
     },
     fallback: fallbackStrategy
