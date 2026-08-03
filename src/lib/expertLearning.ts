@@ -1,4 +1,4 @@
-import type { Account, AccountTypeTemplate, ExpertRule, NoteTask } from "@prisma/client";
+import type { Account, AccountTypeTemplate, NoteTask } from "@prisma/client";
 
 function q(value: string) {
   return JSON.stringify(value);
@@ -8,19 +8,37 @@ function compact(value: unknown) {
   return String(value || "").trim() || "未填写";
 }
 
-export function formatExpertRulesForPrompt(rules?: ExpertRule[] | null) {
+type ExpertRuleLike = {
+  module: string;
+  rule: string;
+  source?: string | null;
+  enabled?: unknown;
+  updatedAt?: Date | string | null;
+};
+
+export function isExpertRuleEnabled(value: unknown) {
+  return value === true || value === 1 || value === "1" || value === "true";
+}
+
+export function formatExpertRulesForPrompt(rules?: ExpertRuleLike[] | null, preferredModules: string[] = []) {
+  const moduleRank = new Map(preferredModules.map((module, index) => [module, index]));
   const activeRules = (rules || [])
-    .filter((rule) => rule.rule.trim())
-    .slice(0, 12);
+    .filter((rule) => isExpertRuleEnabled(rule.enabled) && rule.rule.trim())
+    .sort((left, right) => {
+      const rankDelta = (moduleRank.get(left.module) ?? preferredModules.length) - (moduleRank.get(right.module) ?? preferredModules.length);
+      if (rankDelta) return rankDelta;
+      return new Date(right.updatedAt || 0).getTime() - new Date(left.updatedAt || 0).getTime();
+    })
+    .slice(0, 5);
   if (!activeRules.length) return "";
   return activeRules
-    .map((rule, index) => `${index + 1}. [${rule.module} / ${rule.source || "manual"} / 置信度 ${rule.confidence}] ${rule.rule}`)
+    .map((rule, index) => `${index + 1}. [${rule.module} / ${rule.source || "manual"}] ${rule.rule}`)
     .join("\n");
 }
 
 export function buildPostReviewPrompt(input: {
   account: Account;
-  noteTask?: NoteTask | null;
+  noteTask?: (NoteTask & { type?: string; requiredMaterials?: string; plan?: string }) | null;
   postTitle?: string;
   postUrl?: string;
   publishedAt?: string;
@@ -33,7 +51,8 @@ export function buildPostReviewPrompt(input: {
   distillGoal?: string;
 }) {
   const task = input.noteTask;
-  return `# 单篇小红书帖子专家复盘 Prompt
+  const requiredMaterials = task?.requiredMaterials || task?.requiredImages;
+  return `# 单篇小红书帖子专家复盘任务
 
 请只复盘这一条帖子，并从这一条帖子的真实表现、评论反馈、专家改稿和用户修改中提炼可复用规则。只分析，不执行任何真实账号操作。
 
@@ -53,9 +72,11 @@ export function buildPostReviewPrompt(input: {
 - 发布链接：${compact(input.postUrl)}
 - 发布时间：${compact(input.publishedAt || task?.publishAt)}
 - 原计划内容类型：${compact(task?.contentType)}
+- 笔记媒介类型：${task?.type === "video_text" ? "视频笔记" : "图文笔记"}
 - 原计划内容目标：${compact(task?.contentGoal)}
 - 原计划核心观点：${compact(task?.coreView)}
-- 原计划图片要求：${compact(task?.requiredImages)}
+- 原计划素材要求：${compact(requiredMaterials)}
+- 原计划方案：${compact(task?.plan)}
 - 原计划评论钩子：${compact(task?.commentHook)}
 
 ## 实际发布内容
@@ -79,42 +100,36 @@ ${compact(input.subjective)}
 ## 希望沉淀的能力
 ${input.distillGoal || "提炼这一篇对应的标题规则、封面规则、图片方案规则、正文规则、评论引导规则、风险规则和下次测试变量。"}
 
-## 请输出
-1. 单帖结论：这篇帖子最值得保留和最需要修正的地方。
-2. 数据诊断：曝光、点击、收藏、评论、私信、转化各自说明什么；数据不足时明确写“证据不足”。
-3. 标题诊断：标题是否具体、是否像用户问题、是否有点击理由、是否有广告感。
-4. 封面/图片诊断：真实感、信息密度、图集顺序、图上文字和 AI 味风险。
-5. 正文诊断：开头、信息密度、收藏价值、可信边界、转化边界。
-6. 评论/私信诊断：用户真实关心什么，下次要不要把问题前置进选题。
-7. 专家修改洞察：如果有专家改稿，说明专家为什么这么改。
-8. 下次同类帖子改法：给出可直接执行的标题、封面、图片、正文、评论引导调整建议。
-9. 下次测试变量：最多 2 个，不要一次测试太多变量。
-
-## 可加入规则库的候选规则
-请额外输出 JSON 数组，供系统日积月累沉淀专家技能。每条规则必须来自本帖证据：
+## 输出格式
+只输出一个 JSON 对象，不要输出 Markdown 或额外解释。summary 要包含单帖结论、关键诊断、下次同类帖子改法和最多两个测试变量；evidenceAssessment 要区分有证据的判断和证据不足的判断：
 
 \`\`\`json
-[
+{
+  "summary": "完整复盘总结",
+  "evidenceAssessment": "证据评估",
+  "rules": [
   {
-    "accountType": "${input.account.accountType}",
-    "module": "title | cover | image_plan | body | interaction | risk | positioning",
+    "module": "title | cover | image_plan | video_plan | body | interaction | risk | positioning",
     "rule": "可复用的专家规则",
     "positiveExample": "好的例子",
     "negativeExample": "差的例子",
     "reason": "为什么这条规则成立",
     "source": "post_performance | comments | expert_feedback | user_edit | subjective_observation",
-    "confidence": 0.0,
     "applicableWhen": "适用场景",
     "notApplicableWhen": "不适用场景",
     "nextTest": "下次如何验证"
   }
-]
+  ]
+}
 \`\`\`
 
 要求：
 - 不要把相关性说成确定因果。
-- 如果只是一篇帖子得到的经验，confidence 不得超过 0.6。
-- 如果有连续多篇相同证据，才可以写 confidence 0.7 以上。
+- 视频分镜、动态、节奏和拼接经验使用 video_plan；图集经验使用 image_plan。
+- 如果“专家点评 / 用户修改意见”中包含明确、可复用的修改要求，必须优先将其转化为对应模块的规则，并将 source 标记为 expert_feedback。即使同时存在标题、封面、互动等其他发现，这类规则也应优先保留在最多 5 条规则内。
+- 例如专家指出“文风过于理性叙述，缺少真人分享感”时，应生成 body 规则，明确如何用真实可核验的场景、具体观察和自然口语改善表达；不得伪造个人经历或没有证据的感受。
+- 专家点评只包含一次性偏好、无法复用的主观判断，或与真实性、账号身份边界冲突时，不得强行写成规则；在 evidenceAssessment 中说明原因。
+- 最多输出 5 条规则，只保留有本帖证据支撑的可复用规则。
 - 规则用于后续生成 Prompt，不是直接对外发布文案。`;
 }
 
@@ -214,7 +229,6 @@ export function buildIndustryLearningPrompt(input: {
     "negativeExample": "差的例子",
     "reason": "为什么这条规则成立",
     "source": "industry_article | expert_article | xhs_hot_note | comments | case_study",
-    "confidence": 0.0,
     "applicableWhen": "适用场景",
     "notApplicableWhen": "不适用场景",
     "nextTest": "如何在当前账号验证"

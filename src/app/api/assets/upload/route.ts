@@ -30,6 +30,13 @@ function getFileExt(file: File) {
   return mime.replace(/[^a-z0-9]/gi, "").toLowerCase() || "bin";
 }
 
+type MediaType = "image" | "video";
+const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "m4v", "webm"]);
+
+function getMediaType(file: File): MediaType {
+  return file.type.startsWith("video/") || VIDEO_EXTENSIONS.has(getFileExt(file)) ? "video" : "image";
+}
+
 function readRequiredHeader(request: Request, name: string) {
   return request.headers.get(name) || request.headers.get(name.toLowerCase()) || "";
 }
@@ -57,7 +64,7 @@ async function createSignedUpload(file: File, request: Request) {
       "xhs-test": xhsTest
     },
     body: JSON.stringify({
-      type: "image",
+      type: getMediaType(file),
       ext: getFileExt(file)
     })
   });
@@ -93,7 +100,7 @@ async function createBatchSignedUploads(files: File[], request: Request) {
       "xhs-test": xhsTest
     },
     body: JSON.stringify({
-      type: "image",
+      type: getMediaType(files[0]),
       exts: files.map((file) => getFileExt(file))
     })
   });
@@ -130,12 +137,14 @@ export async function POST(request: Request) {
     const form = await request.formData();
     const files = [...form.getAll("files"), ...form.getAll("file")].filter((item): item is File => item instanceof File);
     if (!files.length) {
-      return NextResponse.json({ error: "缺少图片文件" }, { status: 400 });
+      return NextResponse.json({ error: "缺少素材文件" }, { status: 400 });
     }
+
+    const mediaTypes = new Set(files.map(getMediaType));
 
     const assets = [];
     const signedUploads =
-      files.length > 1
+      files.length > 1 && mediaTypes.size === 1
         ? await createBatchSignedUploads(files, request).catch(async () => {
             const fallbackItems = [];
             for (const file of files) {
@@ -154,7 +163,7 @@ export async function POST(request: Request) {
         filePath: signed.file || file.name,
         localFilePath: signed.file || file.name,
         fileUrl: signed.url,
-        fileType: file.type || "application/octet-stream",
+        fileType: file.type || `${getMediaType(file)}/${getFileExt(file)}`,
         sourceType: String(form.get("sourceType") || "真实素材"),
         tags: String(form.get("tags") || ""),
         suitableTypes: String(form.get("suitableTypes") || ""),

@@ -22,9 +22,8 @@ export type ResolvedNoteContentStructure = {
   categoryName: string;
   archetypeName: string;
   focus: string;
-  primaryStructure: string;
+  contentCandidates: string[];
   structureSource: "note_task" | "library";
-  openingOptions: string[];
   optionalInformation: string[];
   avoid: string[];
 };
@@ -648,6 +647,16 @@ function matchPreset(
   return bestPreset || library.fallback;
 }
 
+function normalizeContentCandidates(value: string) {
+  return value
+    .replace(/^\s*可选内容要点\s*[:：]?\s*/u, "")
+    .split(/(?:\s*(?:->|→|｜|\|)\s*|\n+|[；;])/u)
+    .map((item) => item.replace(/^\s*(?:[-*•]|\d+[.、])\s*/u, "").trim())
+    .filter(Boolean)
+    .map((item) => item.replace(/^(?:开头|接着|然后|最后)\s*/u, "").trim())
+    .filter(Boolean);
+}
+
 export function resolveNoteContentStructure(input: {
   mode: AccountVisualMode;
   isWedding: boolean;
@@ -664,9 +673,8 @@ export function resolveNoteContentStructure(input: {
     categoryName: library.categoryName,
     archetypeName: preset.name,
     focus: preset.focus,
-    primaryStructure: taskStructure || preset.fallbackStructure.join(" → "),
+    contentCandidates: taskStructure ? normalizeContentCandidates(taskStructure) : preset.fallbackStructure,
     structureSource: taskStructure ? "note_task" : "library",
-    openingOptions: preset.openingOptions,
     optionalInformation: preset.optionalInformation,
     avoid: preset.avoid
   };

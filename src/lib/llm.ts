@@ -6,6 +6,7 @@ import { fallbackReferenceSummary } from "@/lib/referenceResearch";
 import { fallbackInteractionSummary } from "@/lib/interactionPrompts";
 import { summarizeImageStyleStudyFallback } from "@/lib/imageStyleStudy";
 import type { RecentWeeklyTopicGroup } from "@/lib/weeklyTopicHistory";
+import { normalizeWeeklyTaskMedia } from "@/lib/weeklyPlan";
 
 type LlmResult<T> =
   | { usedLlm: true; data: T; model: string }
@@ -22,7 +23,8 @@ type NoteTaskSeed = {
   painPoint: string;
   coreView: string;
   bodyStructure: string;
-  requiredImages: string;
+  type: "image_text" | "video_text";
+  requiredMaterials: string;
   recommendedAssets: string;
   coverCopyDirection: string;
   commentHook: string;
@@ -34,6 +36,7 @@ type WeeklyPlanInput = {
   theme: string;
   goal: string;
   frequency: number;
+  videoCount?: number;
   ratio: string;
   testHypothesis: string;
   commercializationMove: string;
@@ -151,6 +154,7 @@ export async function regenerateStrategyFromReferenceResearchWithLlm(input: {
     contentFeatures: string;
     personaInsights: string;
     strategyInsights: string;
+    writingStyleInsights: string;
     rawResults: string;
     selectedAccounts: string;
   };
@@ -169,6 +173,8 @@ export async function regenerateStrategyFromReferenceResearchWithLlm(input: {
 - 当前产品模式是 Prompt + Command only，不允许真实发布、评论、点赞、收藏、关注或私信。
 - 不得抄袭参考账号，不得把参考账号素材/经历伪装成我方真实体验。
 - 必须写出“借鉴什么”和“如何避免同质化”。
+- 必须在完整策划案 Markdown 中增加“爆款正文文风库”章节，完整保留参考研究中的文风特点、适用范围、避免事项和案例。
+- 必须在 AGENTS.md 中保留精简版文风库及选择规则：每篇按内容类型、目标用户和内容目标选择一种主文风，必要时最多使用一种辅助文风；学习表达规律，不复制案例原句、个人经历或具体数据；商家账号不得伪装成普通消费者亲历。
 - 必须生成完整策划案 Markdown 和可直接保存为 profiles/<账号名>/AGENTS.md 的内容。
 - 只返回 JSON，不要 Markdown 代码块。
 
@@ -245,6 +251,7 @@ export async function generateWeeklyTasksWithLlm(input: {
     theme: input.weeklyInput.theme,
     goal: input.weeklyInput.goal,
     frequency: input.weeklyInput.frequency,
+    videoCount: input.weeklyInput.videoCount,
     ratio: input.weeklyInput.ratio,
     testHypothesis: input.weeklyInput.testHypothesis,
     commercializationMove: input.weeklyInput.commercializationMove,
@@ -282,12 +289,14 @@ export async function generateWeeklyTasksWithLlm(input: {
 
 要求：
 - 生成 ${input.fallbackTasks.length} 篇。
+- 其中必须有 ${Math.max(0, Math.min(input.weeklyInput.videoCount || 0, input.fallbackTasks.length))} 篇 type 为 video_text，其余为 image_text。
 - 必须优先阅读并遵循输入中的完整 strategy；账号定位、人设、目标用户、内容栏目、标题封面策略、商业化路径和风险边界都应以 strategy 为主要依据，不能只依据账号类型套用通用模板。
 - 如果 weeklyInput.weeklyFocus 非空，它代表用户主动指定的本周重点，应作为本周选题的最高优先级；围绕该重点拆分具体且不重复的任务，同时不得违背 strategy 中的真实性和风险边界。
 - 如果 weeklyInput.weeklyFocus 为空，则以完整 strategy 和本周运营目标为主要依据生成选题。
 - 当前执行模式是只生成计划、Prompt 和命令建议，不允许真实发布或互动。
-- 每篇任务必须具体到用户痛点、核心观点、正文结构、图片要求、评论区钩子。
-- bodyStructure 只能描述面向目标读者的内容推进方式，必须使用可直接转化为发布正文的读者视角表达；不得写成运营分析、素材评估或创作说明。
+- 每篇任务必须具体到用户痛点、核心观点、正文结构、图片或视频素材要求、评论区钩子。
+- bodyStructure 是无顺序、可省略的候选内容要点和事实范围，不是正文结构流程；每项可以独立采用或省略，不得要求逐项覆盖。
+- bodyStructure 不得使用“开头、接着、然后、最后”等顺序词，不得使用箭头、编号或其他固定顺序表达；不得描述语气、文风、开场句式或段落节奏。
 - bodyStructure 不得出现“素材观察”“用于测试”“本篇承担”“不能当攻略”“需要补齐资料”等内部策划话术，也不得使用含义相同的改写。
 - 信息不足只用于约束不能编造的事实，不得把“缺少资料”“参数不全”“不能作为完整攻略”等说明设计成正文开头；需要提醒时，转换成面向读者的自然行动建议，例如“出发前建议确认……”。
 - 推荐素材只能来自输入素材或明确写“素材缺口”，禁止伪造真实素材。
@@ -327,7 +336,8 @@ JSON 字段：
       "painPoint": "",
       "coreView": "",
       "bodyStructure": "",
-      "requiredImages": "",
+      "type": "image_text 或 video_text",
+      "requiredMaterials": "",
       "recommendedAssets": "",
       "coverCopyDirection": "",
       "commentHook": "",
@@ -366,7 +376,8 @@ JSON 字段：
       painPoint: stringFrom(task.painPoint, fallback.painPoint),
       coreView: stringFrom(task.coreView, fallback.coreView),
       bodyStructure: stringFrom(task.bodyStructure, fallback.bodyStructure),
-      requiredImages: stringFrom(task.requiredImages, fallback.requiredImages),
+      type: task.type === "video_text" ? "video_text" as const : "image_text" as const,
+      requiredMaterials: stringFrom(task.requiredMaterials, fallback.requiredMaterials),
       recommendedAssets: stringFrom(task.recommendedAssets, fallback.recommendedAssets),
       coverCopyDirection: stringFrom(task.coverCopyDirection, fallback.coverCopyDirection),
       commentHook: stringFrom(task.commentHook, fallback.commentHook),
@@ -375,7 +386,7 @@ JSON 字段：
     };
   });
 
-  return { usedLlm: true, model: status.model, data: tasks };
+  return { usedLlm: true, model: status.model, data: normalizeWeeklyTaskMedia(tasks, input.weeklyInput.videoCount || 0) };
 }
 
 export async function summarizeReferenceResearchWithLlm(input: {
@@ -383,7 +394,7 @@ export async function summarizeReferenceResearchWithLlm(input: {
   template: AccountTypeTemplate;
   rawResults: string;
   selectedAccounts: string;
-}): Promise<LlmResult<{ summaryMarkdown: string; contentFeatures: string; personaInsights: string; strategyInsights: string }>> {
+}): Promise<LlmResult<{ summaryMarkdown: string; contentFeatures: string; personaInsights: string; strategyInsights: string; writingStyleInsights: string }>> {
   const fallback = fallbackReferenceSummary(input.rawResults);
   const status = getLlmStatus();
   if (!status.enabled) return { usedLlm: false, data: fallback, error: "AI 未启用，已保存原始结果并使用占位总结。" };
@@ -396,6 +407,9 @@ export async function summarizeReferenceResearchWithLlm(input: {
 - 输出必须服务于生成我方账号的人设文件和策划案。
 - 必须优先提炼全国同类型爆款/高互动样本的规律；账号所在城市或本地样本只作为落地差异补充，不能让整体风格和内容策略被本地样本局限。
 - 必须保留研究报告中的爆款帖子作者信息、关注数、作者定位和图片风格分析。
+- 必须额外输出 writingStyleInsights：直接可读的 Markdown 文本，尽量归纳至少 5 种有明显差异的爆款正文文风；每种尽量列出至少 2 个来自研究原文的真实案例。每个案例必须包含标题、作者、URL、足以说明表达特征的短片段和借鉴点。
+- writingStyleInsights 中每种文风写清适用内容类型和用户场景、叙述身份或读者感受、常见开场、信息组织与段落节奏、句子长短和口语程度、情绪浓度、建议/产品信息的自然植入、结尾互动方式，以及容易产生的 AI 味、硬广或同质化问题。
+- 案例片段仅用于说明文风，不复制大段正文；不得编造案例、作者、URL 或帖子事实。样本不足时明确说明，不强行凑数。writingStyleInsights 总长度不超过 6,000 个中文字符。
 - 不得补造、推测或要求评论区结论；本次研究不使用评论数据。
 - 只返回 JSON，不要 Markdown 代码块。
 
@@ -413,7 +427,8 @@ JSON 字段：
   "summaryMarkdown": "# 参考账号研究总结 Markdown，包含候选爆款帖子、作者研究、标题正文、图片风格、互动引导、可借鉴点、差异化机会、风险",
   "contentFeatures": "爆款帖标题正文、作者定位、图片风格和互动引导总结",
   "personaInsights": "对我方账号人设设定的建议",
-  "strategyInsights": "对我方内容栏目、标题、封面、增长、商业化路径的建议"
+  "strategyInsights": "对我方内容栏目、标题、封面、增长、商业化路径的建议",
+  "writingStyleInsights": "# 爆款正文文风洞察 Markdown，包含至少 5 种文风、每种的表达规律、避免事项和不少于 2 个真实案例"
 }`;
 
   const response = await createTextResponse({
@@ -432,7 +447,8 @@ JSON 字段：
       summaryMarkdown: readString(parsed, "summaryMarkdown") || fallback.summaryMarkdown,
       contentFeatures: readString(parsed, "contentFeatures") || fallback.contentFeatures,
       personaInsights: readString(parsed, "personaInsights") || fallback.personaInsights,
-      strategyInsights: readString(parsed, "strategyInsights") || fallback.strategyInsights
+      strategyInsights: readString(parsed, "strategyInsights") || fallback.strategyInsights,
+      writingStyleInsights: readString(parsed, "writingStyleInsights") || fallback.writingStyleInsights
     }
   };
 }

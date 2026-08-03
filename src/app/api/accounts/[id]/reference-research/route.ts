@@ -76,6 +76,7 @@ async function buildReferenceResearchResult(body: z.infer<typeof bodySchema>) {
     updatedAt: new Date(0)
   };
 
+  const researchId = body.researchId || Date.now();
   const rawResults = String(body.rawResults || "");
   const selectedAccounts = String(body.selectedAccounts || "");
   if (!rawResults.trim()) {
@@ -94,17 +95,18 @@ async function buildReferenceResearchResult(body: z.infer<typeof bodySchema>) {
   }
 
   const research = {
-    id: body.researchId || Date.now(),
+    id: researchId,
     accountId: account.id,
     searchKeywords: "",
     commandJson: "[]",
-    researchPrompt: buildReferenceResearchPrompt(account as never, template as never),
+    researchPrompt: buildReferenceResearchPrompt(account as never, template as never, researchId),
     rawResults,
     selectedAccounts,
     summaryMarkdown: summaryResult.data.summaryMarkdown,
     contentFeatures: summaryResult.data.contentFeatures,
     personaInsights: summaryResult.data.personaInsights,
     strategyInsights: summaryResult.data.strategyInsights,
+    writingStyleInsights: summaryResult.data.writingStyleInsights,
     status: "已总结"
   };
 
@@ -112,9 +114,11 @@ async function buildReferenceResearchResult(body: z.infer<typeof bodySchema>) {
     ...account,
     referenceAccounts: [
       selectedAccounts ? `## 人工标记参考账号\n${selectedAccounts}` : "",
+      `## 爆款研究总览\n${summaryResult.data.summaryMarkdown}`,
       `## 参考账号内容特色\n${summaryResult.data.contentFeatures}`,
       `## 人设洞察\n${summaryResult.data.personaInsights}`,
-      `## 策略洞察\n${summaryResult.data.strategyInsights}`
+      `## 策略洞察\n${summaryResult.data.strategyInsights}`,
+      `## 爆款正文文风洞察\n${summaryResult.data.writingStyleInsights}`
     ]
       .filter(Boolean)
       .join("\n\n")
@@ -129,6 +133,7 @@ async function buildReferenceResearchResult(body: z.infer<typeof bodySchema>) {
       contentFeatures: research.contentFeatures,
       personaInsights: research.personaInsights,
       strategyInsights: research.strategyInsights,
+      writingStyleInsights: research.writingStyleInsights,
       rawResults: research.rawResults,
       selectedAccounts: research.selectedAccounts
     },
@@ -196,9 +201,10 @@ export async function POST(request: Request) {
     };
 
     if (body.action === "prepare") {
-      const researchPrompt = buildReferenceResearchPrompt(account as never, template as never);
+      const researchId = body.researchId || Date.now();
+      const researchPrompt = buildReferenceResearchPrompt(account as never, template as never, researchId);
       const research = {
-        id: body.researchId || Date.now(),
+        id: researchId,
         accountId: account.id,
         searchKeywords: "",
         commandJson: "[]",
@@ -209,6 +215,7 @@ export async function POST(request: Request) {
         contentFeatures: "",
         personaInsights: "",
         strategyInsights: "",
+        writingStyleInsights: "",
         status: "待搜索"
       };
       return NextResponse.json({ research, commands: [], researchPrompt });

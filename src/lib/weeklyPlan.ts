@@ -6,6 +6,7 @@ type GenerateWeeklyPlanInput = {
   theme: string;
   goal: string;
   frequency: number;
+  videoCount?: number;
   ratio: string;
   testHypothesis: string;
   commercializationMove: string;
@@ -70,6 +71,42 @@ export function normalizeWeeklyRatio(value: string, frequency: number) {
     .join(" / ");
 }
 
+export type WeeklyTaskMediaType = "image_text" | "video_text";
+
+function contentCategory(value: string) {
+  return value
+    .replace(/^\s*(?:图文笔记|视频脚本|视频笔记)\s*(?:[-—|｜:：/]\s*)?/u, "")
+    .trim() || "主题内容";
+}
+
+export function normalizeWeeklyTaskMedia<T extends { type?: string; contentType?: string }>(
+  tasks: T[],
+  requestedVideoCount: number
+): Array<T & { type: WeeklyTaskMediaType; contentType: string }> {
+  const videoCount = Math.max(0, Math.min(Math.trunc(requestedVideoCount || 0), tasks.length));
+  const preferredVideoIndexes = tasks
+    .map((task, index) => ({
+      index,
+      preferred: task.type === "video_text" || /视频/u.test(String(task.contentType || ""))
+    }))
+    .filter((item) => item.preferred)
+    .map((item) => item.index);
+
+  const videoIndexes = new Set(preferredVideoIndexes.slice(0, videoCount));
+  for (let index = 0; index < tasks.length && videoIndexes.size < videoCount; index += 1) {
+    videoIndexes.add(index);
+  }
+
+  return tasks.map((task, index) => {
+    const type: WeeklyTaskMediaType = videoIndexes.has(index) ? "video_text" : "image_text";
+    return {
+      ...task,
+      type,
+      contentType: `${type === "video_text" ? "视频脚本" : "图文笔记"}-${contentCategory(String(task.contentType || ""))}`
+    };
+  });
+}
+
 const weeklyModeConfigs: Record<AccountVisualMode, WeeklyModeConfig> = {
   culture_tourism: {
     contentTypes: ["目的地种草", "一日动线", "节庆活动", "拍照机位", "交通票务", "避坑问答", "短视频脚本"],
@@ -80,7 +117,7 @@ const weeklyModeConfigs: Record<AccountVisualMode, WeeklyModeConfig> = {
     defaultGoal: "提升收藏、评论咨询和文旅转化",
     subjectLabel: "文旅体验",
     coreView: (subject) => `围绕「${subject}」把真实目的地图、活动现场、动线信息和可核验服务信息组合成一篇能帮助用户决定是否出发的文旅笔记。`,
-    bodyStructure: "开头点出目的地吸引力 -> 推荐动线/核心看点 -> 交通票务/开放时间 -> 适合人群和避坑 -> 评论区提问",
+    bodyStructure: "可选内容要点：目的地的核心吸引点；真实可核验的动线或看点；交通、票务或开放信息；适合人群与出行提醒；与本篇相关的互动问题",
     requiredImages: "默认 5 张：封面真实目的地图 + 游览动线图 + 核心看点/活动现场图 + 交通票务信息卡 + 评论互动卡。素材不足时先列补拍/补资料清单；AI 只能基于真实目的地图做 image2 延展。",
     coverCopyDirection: (subject) => `突出「${subject}」和一个明确出行理由，用 8-14 字短句表达“为什么值得去/适合谁”。`,
     commentHook: (targetUser) => `${targetUser}可以在评论区留下出行日期、同行人、交通方式和最想看的体验，我会按评论补下一篇。`,
@@ -95,7 +132,7 @@ const weeklyModeConfigs: Record<AccountVisualMode, WeeklyModeConfig> = {
     defaultGoal: "提升收藏、体验预约咨询和文化信任",
     subjectLabel: "民俗非遗主题",
     coreView: (subject) => `围绕「${subject}」把真实工艺细节、活动现场、人物/作品授权信息和体验方式组合成一篇尊重文化语境、能转化预约的笔记。`,
-    bodyStructure: "开头点出工艺/民俗的体验感 -> 真实流程和故事 -> 怎么参与/适合谁 -> 时间地点/预约/禁忌 -> 评论区提问",
+    bodyStructure: "可选内容要点：可见的工艺或民俗细节；真实流程或故事；适合的参与人群；已确认的时间、地点、预约或禁忌；与体验相关的互动问题",
     requiredImages: "默认 5 张：封面真实工艺/活动图 + 制作流程图 + 人物/故事图 + 体验预约信息卡 + 尊重禁忌/互动卡。必须标清授权和文化边界；AI 不得伪造传承人或仪式。",
     coverCopyDirection: (subject) => `突出「${subject}」的真实质感和参与方式，用短句表达“为什么想亲自体验”。`,
     commentHook: (targetUser) => `${targetUser}可以在评论区留下想体验的工艺、出行日期、是否亲子/研学和预算，我会按评论补下一篇。`,
@@ -110,7 +147,7 @@ const weeklyModeConfigs: Record<AccountVisualMode, WeeklyModeConfig> = {
     defaultGoal: "提升收藏、评论咨询和订房转化",
     subjectLabel: "住宿主题",
     coreView: (subject) => `围绕「${subject}」把真实房间/景观图、设施图、周边体验和可核验预订信息组合成一篇降低入住决策成本的笔记。`,
-    bodyStructure: "开头点出入住场景 -> 房型/景观/设施 -> 周边怎么玩 -> 价格房态/政策 -> 评论区提问",
+    bodyStructure: "可选内容要点：入住场景和适合人群；真实房型、景观或设施；可确认的周边体验；已确认的价格、房态或政策；与入住需求相关的互动问题",
     requiredImages: "默认 5 张：封面真实房间/景观图 + 房型设施图 + 周边体验图 + 价格预订信息卡 + FAQ 互动卡。AI 不得改变房型、面积、景观和设施。",
     coverCopyDirection: (subject) => `突出「${subject}」和一个入住场景，用短句表达“适合谁来住”。`,
     commentHook: (targetUser) => `${targetUser}可以在评论区留下日期、人数、预算、亲子/宠物/停车需求，我会按评论补下一篇。`,
@@ -125,7 +162,7 @@ const weeklyModeConfigs: Record<AccountVisualMode, WeeklyModeConfig> = {
     defaultGoal: "提升收藏、评论咨询和到店转化",
     subjectLabel: "餐饮到店",
     coreView: (subject) => `围绕「${subject}」明确本篇是单个菜品、营销活动还是当地特色，把同名真实菜品图、套餐/活动图、门店环境图和交通指南漫画卡组合成一篇能帮助用户决定是否到店的笔记。价格、人均、距离、营业时间、停车、活动规则和食材来源未填写时只标记待核验，不生成具体数字或承诺。`,
-    bodyStructure: "开头直接点出主推菜/活动/当地特色 -> 讲这道菜或活动为什么值得来 -> 补充套餐/同行场景 -> 展示门店环境和交通停车 -> 评论区收集人数、预算、忌口和到店问题。价格、距离、停车、食材来源、活动优惠只写商家已确认信息；未知写待确认。",
+    bodyStructure: "可选内容要点：主推菜、活动或当地特色的可见特点；适合的同行场景或点单选择；真实门店环境；已确认的到店、停车或活动信息；人数、预算或忌口相关的互动问题。价格、距离、停车、食材来源和活动优惠仅限商家已确认信息。",
     requiredImages: "默认 6 张：封面真实主推菜图 + 主推菜细节图 + 第二道菜/套餐或活动权益图 + 内部环境图 + 门头/外部环境图 + 交通指南漫画/信息卡。客户图片先存到龙虾所在电脑可访问目录，文件名尽量就是菜品名、环境名或交通节点名；AI 只能基于真实菜品图和真实环境图做 image2 延展，不得凭空伪造菜品、门店或交通信息。交通指南漫画/信息卡只使用已确认地标、停车和路线信息；未确认则生成补资料清单。",
     coverCopyDirection: (subject) => `突出「${subject}」的单菜品卖点、活动利益点或当地特色，用 8-14 字短句表达“为什么值得点/值得来”。`,
     commentHook: (targetUser) => `${targetUser}可以在评论区留下想吃的菜、人数、预算、忌口、到店时间或停车交通问题，我会按评论补下一篇。`,
@@ -140,7 +177,7 @@ const weeklyModeConfigs: Record<AccountVisualMode, WeeklyModeConfig> = {
     defaultGoal: "提升收藏、评论咨询和关注转化",
     subjectLabel: "路线/活动",
     coreView: (subject) => `围绕「${subject}」把真实现场图、路线图/轨迹截图、关键路况和可核验信息组合成一篇能帮助用户决定是否出发的笔记。`,
-    bodyStructure: "开头点出路线亮点 -> 距离/爬升/难度 -> 关键路况和风景节点 -> 交通/补给/装备 -> 安全核验和评论区提问",
+    bodyStructure: "可选内容要点：路线的一个真实亮点或判断问题；已核验的距离、爬升或难度；关键路况或风景节点；交通、补给或装备信息；自然的安全提醒和互动问题",
     requiredImages: "默认 5 张：封面真实现场图 + 路线图/轨迹截图 + 关键路况图 + 风景情绪图 + 装备/注意事项信息卡。AI 只能基于真实现场图做 image2 延展，不得凭空伪造风景、轨迹或路况。",
     coverCopyDirection: (subject) => `突出「${subject}」和一个明确路线判断，用 8-14 字短句表达“为什么值得走/适合谁”。`,
     commentHook: (targetUser) => `${targetUser}可以在评论区留下体力基础、出发季节、交通方式、是否独行和最担心的问题，我会按评论补下一篇。`,
@@ -155,7 +192,7 @@ const weeklyModeConfigs: Record<AccountVisualMode, WeeklyModeConfig> = {
     defaultGoal: "提升收藏、预约咨询和研学/票务转化",
     subjectLabel: "展览/研学主题",
     coreView: (subject) => `围绕「${subject}」把真实展品/展厅图、观展动线、展品故事和预约票务信息组合成一篇能帮助用户安排观展的笔记。`,
-    bodyStructure: "开头点出展览看点 -> 展品/展厅故事 -> 观展动线和适合人群 -> 预约票务/拍摄规则 -> 评论区提问",
+    bodyStructure: "可选内容要点：展览或展品的核心看点；真实展厅或展品故事；适合人群与观展动线；已确认的预约、票务或拍摄规则；与观展需求相关的互动问题",
     requiredImages: "默认 5 张：封面真实展品/展厅图 + 观展动线图 + 核心展品故事图 + 预约票务信息卡 + 亲子/研学互动卡。必须核验拍摄规则和版权限制。",
     coverCopyDirection: (subject) => `突出「${subject}」和适合人群，用短句表达“为什么值得看/值得带孩子来”。`,
     commentHook: (targetUser) => `${targetUser}可以在评论区留下观展时间、孩子年龄、是否需要讲解和最想看的展区，我会按评论补下一篇。`,
@@ -170,7 +207,7 @@ const weeklyModeConfigs: Record<AccountVisualMode, WeeklyModeConfig> = {
     defaultGoal: "提升收藏、评论咨询和产品转化",
     subjectLabel: "产品/礼盒",
     coreView: (subject) => `围绕「${subject}」把真实产品图、产地/工艺图、使用场景和规格价格信息组合成一篇能帮助用户判断是否购买的笔记。`,
-    bodyStructure: "开头点出产品记忆点 -> 产地/工艺/用途 -> 适合送谁/怎么用 -> 规格价格/物流保存 -> 评论区提问",
+    bodyStructure: "可选内容要点：产品的真实记忆点；可核验的产地、工艺或用途；适合的使用或送礼场景；已确认的规格、价格、物流或保存信息；与选择需求相关的互动问题",
     requiredImages: "默认 5 张：封面真实产品图 + 原料/工艺图 + 使用/送礼场景图 + 规格价格信息卡 + FAQ 互动卡。AI 不得改变产品外观、规格、包装和产地。",
     coverCopyDirection: (subject) => `突出「${subject}」和一个使用/送礼场景，用短句表达“为什么值得买”。`,
     commentHook: (targetUser) => `${targetUser}可以在评论区留下用途、预算、口味偏好和送礼对象，我会按评论补下一篇。`,
@@ -185,7 +222,7 @@ const weeklyModeConfigs: Record<AccountVisualMode, WeeklyModeConfig> = {
     defaultGoal: "提升评论咨询、预约和信任转化",
     subjectLabel: "服务项目",
     coreView: (subject) => `围绕「${subject}」把真实空间、服务流程、设备/资质和价格预约信息组合成一篇降低用户顾虑的笔记。`,
-    bodyStructure: "开头点出服务痛点 -> 服务流程/设备/资质 -> 适合谁不适合谁 -> 价格预约/风险边界 -> 评论区提问",
+    bodyStructure: "可选内容要点：用户关心的服务问题；真实服务流程、设备或资质；适合与不适合的条件；已确认的价格、预约或风险边界；与服务需求相关的互动问题",
     requiredImages: "默认 5 张：封面真实服务结果/空间图 + 流程细节图 + 设备/资质图 + 价格预约信息卡 + FAQ 互动卡。案例和前后对比必须授权，AI 不得伪造效果。",
     coverCopyDirection: (subject) => `突出「${subject}」和一个明确痛点，用短句表达“为什么可以放心了解”。`,
     commentHook: (targetUser) => `${targetUser}可以在评论区留下预算、时间、顾虑和是否需要预约，我会按评论补下一篇。`,
@@ -202,7 +239,7 @@ const weddingWeeklyConfig: WeeklyModeConfig = {
   defaultGoal: "提升收藏、评论咨询和婚礼策划预约转化",
   subjectLabel: "婚礼细节",
   coreView: (subject) => `围绕「${subject}」先判断真实婚礼图片里的可写细节，例如婚礼蛋糕、甜品台、花艺、仪式区、迎宾区、桌花、席位卡、灯光或纸品；再选一个最有小红书收藏价值的细节，参考同类型爆款文章的标题节奏和情绪表达，写成备婚用户能保存、能咨询的笔记。`,
-  bodyStructure: "开头点出图片里的高记忆点细节 -> 拆解色系/材质/花材/空间层次/适合风格 -> 说明适合什么新人/场地/季节 -> 给备婚落地提醒和待确认信息 -> 评论区收集婚期、城市、预算和喜欢风格",
+  bodyStructure: "可选内容要点：图片中可见的高记忆点细节；色系、材质、花材或空间层次；适合的新人、场地或季节；基于已确认事实的备婚提醒；婚期、城市、预算或风格偏好相关的互动问题",
   requiredImages: "默认 5 张：封面真实婚礼细节图 + 同场景远景/关系图 + 细节近景拆解图 + 风格/预算/适合人群信息卡 + 备婚 FAQ/咨询引导卡。必须基于客户真实婚礼图片先做画面判断，不得伪造新人、宾客、婚礼案例、价格、档期、场地或授权。",
   coverCopyDirection: (subject) => `突出「${subject}」里的一个细节名和备婚收藏理由，用 8-14 字短句表达“为什么这个细节值得抄作业”。`,
   commentHook: (targetUser) => `${targetUser}可以在评论区留下城市、婚期、预算、场地类型和喜欢的风格，我会按图片细节继续拆下一篇。`,
@@ -230,7 +267,7 @@ export function buildNoteTasks(
   const targetUser = account.targetUsers || config.fallbackTargetUser;
   const availableAssetNames = assets.slice(0, 8).map((asset) => asset.filePath).join("\n");
 
-  return Array.from({ length: Math.max(1, Math.min(input.frequency || 5, 7)) }).map((_, index) => {
+  const tasks = Array.from({ length: Math.max(1, Math.min(input.frequency || 5, 7)) }).map((_, index) => {
     const date = addDays(weekStart, index);
     const column = columns[index % columns.length];
     const contentType = config.contentTypes[index % config.contentTypes.length];
@@ -241,13 +278,16 @@ export function buildNoteTasks(
       weeklyPlanId: plan.id,
       publishAt: `${format(date, "yyyy-MM-dd")} 20:30`,
       contentType,
-      contentGoal: `${input.goal || config.defaultGoal}；本篇承担「${column}」栏目测试。`,
+      contentGoal: `${input.goal || config.defaultGoal}；本篇聚焦「${column}」栏目。`,
       topicTitle: `${subject}｜${column}：给${targetUser}的${config.subjectLabel}决策笔记`,
       targetUser,
       painPoint,
       coreView: config.coreView(subject),
       bodyStructure: config.bodyStructure,
-      requiredImages: config.requiredImages,
+      type: index < Math.max(0, Math.min(input.videoCount || 0, input.frequency || 5)) ? "video_text" as const : "image_text" as const,
+      requiredMaterials: index < Math.max(0, Math.min(input.videoCount || 0, input.frequency || 5))
+        ? "视频笔记：可直接使用 1 个已上传视频，或选择 2-6 张素材库图片生成分镜视频。"
+        : config.requiredImages,
       recommendedAssets: input.availableAssets || availableAssetNames || "从本账号 assets 目录中选择标签匹配的真实素材。",
       coverCopyDirection: config.coverCopyDirection(subject),
       commentHook: config.commentHook(targetUser),
@@ -255,6 +295,7 @@ export function buildNoteTasks(
       status: "待生成Prompt"
     };
   });
+  return normalizeWeeklyTaskMedia(tasks, input.videoCount || 0);
 }
 
 function safeJson(value: string) {
