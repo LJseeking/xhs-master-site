@@ -1,6 +1,5 @@
 import type { Account, AccountStrategy, NoteTask, WeeklyPlan } from "@prisma/client";
 import { accountVisualMode, isWeddingAccount, type AccountVisualMode } from "@/lib/imagePrompts";
-import { resolveNoteContentStructure } from "@/lib/noteContentStructures";
 
 type PromptAccount = Account & {
   referenceResearches?: Array<{
@@ -30,10 +29,15 @@ function extractWritingStyleInsights(referenceAccounts: unknown) {
   return compactPromptText(content, 8000);
 }
 
+export function hasUsableWritingStyleLibrary(referenceAccounts: unknown) {
+  const insights = extractWritingStyleInsights(referenceAccounts);
+  return /(?:^|\n)###\s*文风：\S+/u.test(insights);
+}
+
 function buildReferenceStyleBrief(account: PromptAccount) {
   const writingStyleInsights = extractWritingStyleInsights(account.referenceAccounts);
   if (writingStyleInsights) {
-    return `以下为账号已沉淀的爆款正文文风洞察。必须根据本篇主题、账号身份和目标用户，从中选择一种主文风；必要时最多使用一种辅助文风，并模仿其表达规律：\n${writingStyleInsights}`;
+    return `以下为账号已沉淀的完整爆款正文文风库。它只用于选择和仿写，不是要混合使用的写作清单：\n${writingStyleInsights}`;
   }
 
   const latest = account.referenceResearches?.[0];
@@ -95,7 +99,8 @@ function baseContext(input: {
 - 目标用户：${noteTask.targetUser}
 - 痛点：${noteTask.painPoint}
 - 核心观点：${noteTask.coreView}
-- 正文策划提纲（只提取主题、事实和信息顺序，不得照抄其中的内部策划措辞）：${noteTask.bodyStructure || "未填写，由品类结构库提供兜底结构"}
+- 可写事实与核心观点：${noteTask.coreView}
+- 素材与事实范围：${noteTask.requiredMaterials || "未填写"}；${noteTask.recommendedAssets || "未填写"}
 - 预期目标：${noteTask.expectedGoal}
 - 封面方向：${noteTask.coverCopyDirection}
 - 评论钩子：${noteTask.commentHook}
@@ -104,7 +109,13 @@ function baseContext(input: {
 ## 爆款研究文风参考
 ${buildReferenceStyleBrief(account)}
 
-当上述内容包含“爆款正文文风洞察”时，必须实际参考其中的主文风来完成正文，模仿其开场切入、信息组织、句式节奏、口语程度、情绪浓度和互动方式；案例中的“原文短摘录”是语言样本，必须优先学习其表达节奏和口语方式，而不是只参考抽象总结。不得复制参考标题、正文句子、个人经历或具体数据；需要基于我方已核验事实重新表达。爆款研究中的“资料员”“运营”“服务型人格”等内部策略标签不得直接写入正文。若研究启发与账号人设、本篇任务或事实边界冲突，以账号人设、本篇任务和事实边界为准。
+## 文风选择与结构性仿写（必须先完成）
+1. 完整阅读“爆款研究文风参考”，根据本篇主题、核心观点、目标用户、素材和事实边界，选择且只能选择一种主文风。
+2. 在内部形成该文风对应的结构性仿写策略：开场机制、段落功能、信息释放节奏、情绪曲线、句式口语程度、我方事实的自然放置位置和收尾方式。
+3. 正文只能使用被选中文风的叙事结构和表达规律，不得混用其他文风的开场、段落节奏、情绪曲线或结尾方式，也不得退回通用说明文结构。
+4. 案例中的原文短摘录只用于学习节奏和结构，不得复制参考标题、正文句子、独特比喻、个人经历、具体数据或结论。
+5. 允许适当使用第一人称观察、情绪、犹豫、偏好和想象性场景增强叙事；不得把创作性表达伪装成已发生、可核验的到店、购买、入住、客户反馈、交易、价格、效果、路线、活动或授权事实。
+6. 如果文风库不可用、无法明确选择一种文风，或无法形成结构性仿写策略，立即停止并报告失败；不得使用固定模板或兜底文风。
 
 ## 已沉淀专家规则
 ${expertRules || "暂无已保存规则；按账号策划案和本篇任务生成。"}`;
@@ -222,13 +233,6 @@ function buildModeTaskPrompt(input: {
   const weddingAccount = isWeddingAccount(input.account);
   const promptTitle = weddingAccount ? "婚礼服务小红书笔记草稿 Prompt（发布精简版）" : copy.title;
   const imagePanelName = weddingAccount ? "婚礼图片创作" : copy.imagePanelName;
-  const structure = resolveNoteContentStructure({
-    mode,
-    isWedding: weddingAccount,
-    contentType: input.noteTask.contentType,
-    topicTitle: input.noteTask.topicTitle,
-    bodyStructure: input.noteTask.bodyStructure
-  });
   const weddingRules = weddingAccount
     ? [
         "这是婚礼公司小红书发布稿，图片是选题入口，不是只做服务介绍。",
@@ -241,44 +245,41 @@ function buildModeTaskPrompt(input: {
 
 ${baseContext({ ...input, imagePanelName })}
 
-## 本篇候选内容与事实边界
-- 内容品类：${structure.categoryName}
-- 内容原型：${structure.archetypeName}
-- 本篇核心作用：${structure.focus}
-- 候选内容：${structure.contentCandidates.join("；")}
-- 候选来源：${structure.structureSource === "note_task" ? "本篇 noteTask.bodyStructure，仅作为内部候选内容；不得复制其中的内部措辞" : "本篇缺少有效 bodyStructure，使用品类候选内容池兜底"}
-- 按需补充：${structure.optionalInformation.join("、")}。只写与本篇主题直接相关且已经核验的信息。
-- 避免：${structure.avoid.join("；")}
-
-候选内容没有先后顺序，也没有逐项覆盖要求。根据所选爆款文风、图片内容和读者阅读体验自行决定开场、信息顺序、段落节奏和结尾；不得按照候选项原始排列顺序逐条展开。不要固定使用“为什么值得去/值得买/值得住”开头，也不要机械重复“先……再……最后……”。
+## 本篇事实与素材边界
+- 主题与核心观点：${input.noteTask.topicTitle}；${input.noteTask.coreView}
+- 可用素材与事实范围：${input.noteTask.requiredMaterials || "未填写"}；${input.noteTask.recommendedAssets || "未填写"}
+- 只使用与本篇主题直接相关、已确认或可从素材直接观察到的信息；不要求覆盖全部信息，也不得自行补出缺失事实。
 
 ## 品类与事实边界
 - ${copy.styleRules.join("\n- ")}
-${weddingRules.length ? `- ${weddingRules.join("\n- ")}\n` : ""}- 正文控制在 300-600 中文字；最多 6 个短段落。
+${weddingRules.length ? `- ${weddingRules.join("\n- ")}\n` : ""}- 正文控制在 300-600 中文字；段落数量、长短和节奏由被选中的爆款文风决定。
 - ${isVideo ? "视频时长和镜头顺序以 video-path.txt 指向的最终视频为准。" : `${imageCountLine}仅作为策划参考，实际以 image-paths.txt 中的成品图片数量和顺序为准。`}
 - 正文必须与${isVideo ? "最终视频" : "整组图片"}表达一致，${isVideo ? "但不要机械复述每个镜头。" : "但不要机械地逐图解说，也不要求每张图对应一个独立句子。"}
 - 使用当前账号设定的对外身份直接面向目标用户表达，语言自然、具体、有生活感，不要像硬广。
 - 账号身份资料只用于理解定位；如果其中含有“客户”“运营账号”“需要通过素材”等内部描述，必须转换成直接面对用户的自然表达，不得原样写进正文。
 - 禁止出现“作为运营人员”“作为 AI”“本篇内容”“这篇笔记将介绍”“我们的内容策略”“接下来生成”等幕后创作语言。
-- 不得评价图片是否“适合拿来做内容、攻略或参考”，不得使用“这组图适合……”“这组图告诉我们……”之类的开场；图片只作为事实依据，正文直接进入目标用户关心的场景、问题、判断或行动建议。
+- 不得评价图片是否“适合拿来做内容、攻略或参考”，不得使用“这组图适合……”“这组图告诉我们……”之类的开场；图片只作为事实依据，开场方式必须遵循被选中的爆款文风。
 - 不得讨论帖子是否完整、能否作为攻略，也不得向读者说明仍缺少哪些资料；信息不足时省略未确认事实，必要提醒改写为“出发前建议确认……”等自然的读者行动建议。
 - 不得描述素材、选题、内容测试、创作目的、生成过程或内部核验，不得使用“作为判断参考”“素材观察”“本篇承担”“用于测试”等分析报告语气及其同义表达。
-- 商家账号可以使用符合实际的“我们”“店里”；个人账号只有在真实亲历已经明确时才能使用第一人称经历。没有亲历依据时使用客观说明，不得写“我走过”“我住过”“我体验过”。
+- 可以使用第一人称观察、情绪、犹豫、偏好和想象性场景增强叙事；但不得将创作性表达伪装为已发生、可核验的到店、购买、入住、客户反馈、交易、价格、效果、路线、活动或授权事实。
 - 不要解释为什么这样写，不要在发布正文中出现选题、运营、Prompt、模型、生成、素材缺口或内部核验过程。
 - 如果图片或事实信息不足，不得编造；把缺口作为内部执行结果报告，不要写进标题或正文。
 
 ## 内部生成与检查
-- 内部比较 3 个标题候选，选择最符合账号人设、本篇结构和小红书标题限制的 1 个，不输出候选过程。
+- 内部比较 3 个标题候选，选择最符合账号人设、被选中文风和小红书标题限制的 1 个，不输出候选过程。
 - 内部完成图片与正文对应检查、事实检查和“${copy.checkTitle}”，不把检查过程写入发布内容。
 - 内部确认正文没有运营分析、创作说明、图片说明、人工核验项或重复安全声明。
 - 写入 content.txt 前进行读者视角复查；如果正文在评价图片或帖子、解释创作目的、暴露资料缺口或使用分析报告语气，必须先重写。
-- 正文开头必须直接进入目标用户的场景、问题、判断或行动建议，不能以素材评价、内容完整性声明或资料缺口说明开头。
+- 正文不得以素材评价、内容完整性声明或资料缺口说明开头；其余开场方式遵循被选中的爆款文风。
 
 ## 最终内容
 只生成并写入以下最终内容：
 1. 最终标题 1 个。
-2. 正文发布稿 1 份，控制在 300-600 中文字、最多 6 个短段落。
+2. 正文发布稿 1 份，控制在 300-600 中文字，段落节奏遵循被选中的爆款文风。
 3. 正文最后一行放 5-6 个话题标签。
 
-不要把标题候选、封面文案、图集配文清单、置顶评论、检查清单或任何内部分析写入 title.txt 和 content.txt。`;
+不要把标题候选、封面文案、图集配文清单、置顶评论、检查清单或任何内部分析写入 title.txt 和 content.txt。
+
+## 完成报告
+在任务最终回复中单独说明：所选文风名称、选择原因、结构性仿写策略摘要、最终标题和草稿保存结果。不得将文风选择过程或策略摘要写入 title.txt 和 content.txt。`;
 }

@@ -58,7 +58,7 @@ import {
 import { generateStrategyWithBrowserLlm, generateWeeklyTasksWithBrowserLlm } from "@/lib/browserStrategyLlm";
 import { loadBrowserWorkspace, saveBrowserWorkspace } from "@/lib/browserWorkspace";
 import { accountTypeTemplates } from "@/data/accountTypeTemplates";
-import { buildNoteTasks, clampWeeklyFrequency, normalizeWeeklyRatio, normalizeWeeklyTaskMedia } from "@/lib/weeklyPlan";
+import { clampWeeklyFrequency, normalizeWeeklyRatio, normalizeWeeklyTaskMedia } from "@/lib/weeklyPlan";
 import { collectRecentWeeklyTopicGroups } from "@/lib/weeklyTopicHistory";
 import { isExpertRuleEnabled } from "@/lib/expertLearning";
 import type React from "react";
@@ -229,7 +229,6 @@ type NoteTask = {
   targetUser: string;
   painPoint: string;
   coreView: string;
-  bodyStructure: string;
   requiredMaterials: string;
   recommendedAssets: string;
   coverCopyDirection: string;
@@ -1307,7 +1306,6 @@ function mapBackendAccountToUiAccount(account: BackendAccountDetail): Account {
       targetUser: task.targetUser || "",
       painPoint: task.painPoint || "",
       coreView: task.coreView || "",
-      bodyStructure: task.bodyStructure || "",
       type: task.type === "video_text" ? "video_text" as const : "image_text" as const,
       requiredMaterials: task.requiredMaterials || "",
       recommendedAssets: task.recommendedAssets || "",
@@ -1429,7 +1427,7 @@ function toBackendNoteTask(task: NoteTask): BackendNoteTask {
     targetUser: task.targetUser,
     painPoint: task.painPoint,
     coreView: task.coreView,
-    bodyStructure: task.bodyStructure,
+    bodyStructure: "",
     requiredMaterials: task.requiredMaterials,
     recommendedAssets: task.recommendedAssets,
     coverCopyDirection: task.coverCopyDirection,
@@ -1946,7 +1944,7 @@ export function XhsMasterApp() {
         taboos: String(payload.taboos || ""),
         noteTasks: []
       };
-      const fallbackWeeklyInput = {
+      const weeklyPlanInput = {
         theme: plan.theme,
         goal: plan.goal,
         frequency: plan.frequency,
@@ -1962,25 +1960,18 @@ export function XhsMasterApp() {
         ? []
         : collectRecentWeeklyTopicGroups(selected.weeklyPlans || [], plan.weekStart);
       const weeklyInput = {
-        ...fallbackWeeklyInput,
+        ...weeklyPlanInput,
         videoCount,
         weeklyFocus,
         recentTopicGroups
       };
-      const fallbackTasks = buildNoteTasks(
-        selected as never,
-        (selected.strategy as never) || null,
-        (selected.assets || []) as never,
-        fallbackWeeklyInput,
-        plan as never
-      );
       const llmResult = await generateWeeklyTasksWithBrowserLlm({
         account: selected,
         strategy: selected.strategy || null,
         assets: selected.assets || [],
         weeklyPlan: { id: plan.id },
         weeklyInput,
-        fallbackTasks
+        taskCount: frequency
       });
       const nextPlan = {
         ...plan,
@@ -2004,7 +1995,7 @@ export function XhsMasterApp() {
       }));
       setSelectedNoteId(mappedSavedPlan.noteTasks?.[0]?.id ?? null);
       setActiveTab("prompts");
-      showToast(llmResult.usedLlm ? "本周内容计划已生成。" : llmResult.error || "已使用默认模板生成本周内容计划。");
+      showToast("本周内容计划已生成。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "生成计划失败。");
     } finally {
@@ -2485,8 +2476,8 @@ export function XhsMasterApp() {
           task,
           {
             imageSourceMode: "ai_auto_select",
-            noteContent: [task.coreView, task.bodyStructure].filter(Boolean).join("\n"),
-            singleGoal: "围绕这篇笔记内容，生成封面、图集顺序、图上文字、正文结构和风险核验。",
+            noteContent: task.coreView,
+            singleGoal: "围绕这篇笔记主题和可用事实，生成封面、图集顺序、图上文字和风险核验。",
             imageCount: String(imageCount),
             candidateAssets,
             removeWatermarks: Boolean(options.removeWatermarks)
@@ -4201,7 +4192,7 @@ function ImagesPanel(props: {
   const [weddingPlanningGoal, setWeddingPlanningGoal] = useState(weddingPlanningGoalPresets[0].value);
   const [imageWorkflowMode, setImageWorkflowMode] = useState<"batch" | "single">("single");
   const [singleSourceMode, setSingleSourceMode] = useState<SingleImageSourceMode>("ai_auto_select");
-  const [singleImageGoal, setSingleImageGoal] = useState("围绕这篇笔记内容，生成封面、图集顺序、图上文字、正文结构和风险核验。");
+  const [singleImageGoal, setSingleImageGoal] = useState("围绕这篇笔记主题和可用事实，生成封面、图集顺序、图上文字和风险核验。");
   const [singleImageCount, setSingleImageCount] = useState("5");
   const [batchUploadFiles, setBatchUploadFiles] = useState<File[]>([]);
   const [singleUploadFiles, setSingleUploadFiles] = useState<File[]>([]);
@@ -4549,7 +4540,7 @@ function ImagesPanel(props: {
                 <Textarea
                   name="noteContent"
                   label="这篇笔记内容/方向"
-                  defaultValue={note ? [note.coreView, note.bodyStructure].filter(Boolean).join("\n") : ""}
+                  defaultValue={note?.coreView || ""}
                   placeholder="写清楚这一篇要表达什么，例如：围绕婚礼蛋糕细节，拆解为什么它能提升整场婚礼高级感。"
                 />
                 {singleSourceMode === "remote_images" ? (
@@ -5910,7 +5901,7 @@ ${plan.noteTasks
 - 目标用户：${task.targetUser}
 - 用户痛点：${task.painPoint}
 - 核心观点：${task.coreView}
-- 正文结构：${task.bodyStructure}
+- 可写事实与核心观点：${task.coreView}
 - 所需素材：${task.requiredMaterials}
 - 推荐素材：${task.recommendedAssets}
 - 封面文案方向：${task.coverCopyDirection}

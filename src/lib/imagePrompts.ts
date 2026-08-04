@@ -473,7 +473,7 @@ export function buildImagePrompt(input: {
     ]
   };
   const sourceLines = modeLines[sourceMode];
-  const singleContent = (noteContent || "").trim() || noteTask.bodyStructure || noteTask.coreView || "未填写，按当前选题字段生成。";
+  const singleContent = (noteContent || "").trim() || noteTask.coreView || "未填写，按当前选题字段生成。";
 
   return `# ${noteTask.topicTitle} ${copy.promptTitle}
 

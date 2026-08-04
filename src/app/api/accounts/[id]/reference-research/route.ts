@@ -93,6 +93,9 @@ async function buildReferenceResearchResult(body: z.infer<typeof bodySchema>) {
   if (!summaryResult.usedLlm) {
     throw new Error(`OpenAI API 未能完成参考账号总结：${summaryResult.error || "未知错误"}`);
   }
+  if (!/(?:^|\n)###\s*文风：\S+/u.test(summaryResult.data.writingStyleInsights)) {
+    throw new Error("爆款研究未生成可用文风库。请确保每种文风均以“### 文风：唯一名称”独立输出后重试。");
+  }
 
   const research = {
     id: researchId,

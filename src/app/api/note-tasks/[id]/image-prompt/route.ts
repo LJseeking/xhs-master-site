@@ -507,7 +507,7 @@ async function buildImagePromptResult(body: any, requestId: string) {
     targetUser: noteTask.targetUser,
     painPoint: noteTask.painPoint,
     coreView: noteTask.coreView,
-    bodyStructure: noteTask.bodyStructure,
+    bodyStructure: "",
     requiredImages: noteTask.requiredMaterials,
     coverCopyDirection: noteTask.coverCopyDirection,
     expectedGoal: noteTask.expectedGoal

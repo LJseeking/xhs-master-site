@@ -166,7 +166,8 @@ export interface BackendNoteTask {
   targetUser: string;
   painPoint: string;
   coreView: string;
-  bodyStructure: string;
+  // 服务端迁移前的兼容字段；前端不再读取或生成正文结构，写入时固定为空字符串。
+  bodyStructure?: string;
   requiredMaterials: string;
   recommendedAssets: string;
   coverCopyDirection: string;
