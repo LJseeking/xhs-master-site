@@ -11,6 +11,8 @@ export function buildReferenceResearchPrompt(account: Account, template: Account
 
 ## 我方账号基础信息
 - 账号名称：${account.name}
+- OpenClaw 账号 ID（accountParam）：${account.accountParam || "未设置"}
+- 账号对应规则：后续任何需要切换小红书账号的 CLI 操作，必须使用 \`--account ${account.accountParam || "请先填写账号 ID"}\`；不得使用账号名称或本系统数据库编号替代。
 - 账号类型：${template.name}
 - 阶段：${account.stage}
 - 城市：${account.city || "未设置"}
@@ -58,7 +60,7 @@ export function buildReferenceResearchPrompt(account: Account, template: Account
 1. 输出候选帖子清单、标题规律、正文结构、开场方式、表达语气、正文互动引导和重点解决的用户痛点。
 2. 基于全部样本归纳至少 5 种明显不同的正文文风；每种至少由 2 篇真实帖子支撑。
 3. 每种文风必须写明：风格名称、适用场景、叙述身份或读者感受、常见开场、信息组织、段落节奏、句子长短、口语程度、情绪浓度、自然植入方式、结尾互动、AI 味或硬广风险。
-4. 每种文风列出至少 2 个真实案例：标题、作者、帖子 URL、说明特点的短文本片段与借鉴点；不得复制大段正文。
+4. 每种文风列出至少 2 个真实案例：标题、作者、帖子 URL、原文短摘录与借鉴点。原文短摘录必须从 ‘dataset/notes/<note-id>.json’ 的正文中逐字摘取，不得写成“研究提炼为”或自行改写；每条控制在 60-140 个中文字符，优先保留开场句和最能体现该文风的一句。不得复制完整正文或连续大段正文。
 
 输出：\`text_analysis.md\`。
 
@@ -83,7 +85,7 @@ export function buildReferenceResearchPrompt(account: Account, template: Account
 2. 15-20 篇候选爆款帖子清单：标题、URL、作者、发布时间、点赞量、入选原因
 3. 标题风格分析
 4. 正文结构、开场方式和表达语气
-5. 至少 5 种正文文风及每种不少于 2 个真实案例
+5. 至少 5 种正文文风及每种不少于 2 个真实案例；每个案例必须包含标题、作者、URL、标注为“原文短摘录”的逐字短摘录和借鉴点，不能只写概括性标签
 6. 正文互动引导和用户痛点（仅基于正文）
 7. 图片风格综合分析及前 10 篇逐篇前三图视觉分析
 8. 标题、正文与图片协同规律
@@ -95,7 +97,7 @@ export function buildReferenceResearchPrompt(account: Account, template: Account
 ## 最终交付篇幅限制
 - 返回给客户端粘贴的完整研究报告（含 Markdown、URL 和案例）必须不超过 15,000 个字符。
 - 原始帖子详情、完整图片观察、采集日志和缺失明细仅保留在研究目录，不得全文复制到最终报告。
-- 必须在交付前检查 \`final_report.md\` 的字符数；超限时优先压缩重复说明、单帖细节和图片描述，不得删除来源 URL、5 种文风、文风案例、核心视觉规律、可借鉴与避免事项。
+- 必须在交付前检查 \`final_report.md\` 的字符数；超限时优先压缩重复说明、单帖细节和图片描述，不得删除来源 URL、5 种文风、每种的 2 个原文短摘录案例、核心视觉规律、可借鉴与避免事项。
 - 最终只返回 \`final_report.md\` 的内容及研究目录路径；不执行任何账号操作。`;
 }
 

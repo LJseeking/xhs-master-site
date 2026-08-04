@@ -67,6 +67,14 @@ type WeeklyPlanInput = {
   recentTopicGroups?: RecentWeeklyTopicGroup[];
 };
 
+function appendOpenClawAccountIdentity(text: string, account: Pick<ClientAccountInput, "name" | "accountParam">) {
+  const accountParam = account.accountParam?.trim() || "未设置";
+  const marker = `OpenClaw 账号 ID（accountParam）：\`${accountParam}\``;
+  if (text.includes(marker)) return text;
+
+  return `${text.trim()}\n\n## OpenClaw 账号标识\n- 业务账号名称：${account.name}\n- ${marker}\n- 所有需要切换小红书账号的 CLI 命令必须使用：\`--account ${accountParam}\`。账号名称和本系统数据库编号均不可替代该参数。\n`;
+}
+
 function getBrowserLlmStatus() {
   return {
     enabled: true,
@@ -222,6 +230,7 @@ export async function generateStrategyWithBrowserLlm(account: ClientAccountInput
 - 当前产品模式是 Prompt + Command only，不允许真实发布、评论、点赞、收藏、私信。
 - 如果 account.referenceAccounts 中包含参考账号研究洞察，必须优先用于人设、差异化定位、栏目、标题、封面和商业化策略。
 - 必须保留 xiaohongshu_auto_op 的执行边界：真实账号操作只输出命令建议，人工确认。
+- 策划案 Markdown 和 AGENTS.md 都必须包含“OpenClaw 账号标识”章节，写明业务账号名称、OpenClaw 账号 ID（accountParam）以及唯一可用的 \`--account <accountParam>\` 参数。
 - 不伪造真实体验、真实授权、真实探店、真实亲历、真实轨迹或真实交易。
 - 以中文输出。
 - 只返回 JSON，不要 Markdown 代码块。
@@ -284,8 +293,8 @@ JSON 字段：
       data: {
         positioning: readString(parsed, "positioning") || fallback.positioning,
         strategyJson: JSON.stringify(readObject(parsed, "strategy") || safeJson(fallback.strategyJson), null, 2),
-        markdown: readString(parsed, "markdown") || fallback.markdown,
-        agentsMdContent: readString(parsed, "agentsMdContent") || fallback.agentsMdContent,
+        markdown: appendOpenClawAccountIdentity(readString(parsed, "markdown") || fallback.markdown, accountRecord),
+        agentsMdContent: appendOpenClawAccountIdentity(readString(parsed, "agentsMdContent") || fallback.agentsMdContent, accountRecord),
         execGuide: readString(parsed, "execGuide") || fallback.execGuide
       }
     };

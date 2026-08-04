@@ -47,6 +47,14 @@ type WeeklyPlanInput = {
   recentTopicGroups?: RecentWeeklyTopicGroup[];
 };
 
+function appendOpenClawAccountIdentity(text: string, account: Pick<Account, "name" | "accountParam">) {
+  const accountParam = account.accountParam?.trim() || "未设置";
+  const marker = `OpenClaw 账号 ID（accountParam）：\`${accountParam}\``;
+  if (text.includes(marker)) return text;
+
+  return `${text.trim()}\n\n## OpenClaw 账号标识\n- 业务账号名称：${account.name}\n- ${marker}\n- 所有需要切换小红书账号的 CLI 命令必须使用：\`--account ${accountParam}\`。账号名称和本系统数据库编号均不可替代该参数。\n`;
+}
+
 export function getLlmStatus() {
   return {
     enabled: true,
@@ -69,6 +77,7 @@ export async function generateStrategyWithLlm(
 - 当前产品模式是 Prompt + Command only，不允许真实发布、评论、点赞、收藏、私信。
 - 如果 account.referenceAccounts 中包含参考账号研究洞察，必须优先用于人设、差异化定位、栏目、标题、封面和商业化策略。
 - 必须保留 xiaohongshu_auto_op 的执行边界：真实账号操作只输出命令建议，人工确认。
+- 策划案 Markdown 和 AGENTS.md 都必须包含“OpenClaw 账号标识”章节，写明业务账号名称、OpenClaw 账号 ID（accountParam）以及唯一可用的 \`--account <accountParam>\` 参数。
 - 不伪造真实体验、真实授权、真实探店、真实亲历、真实轨迹或真实交易。
 - 以中文输出。
 - 只返回 JSON，不要 Markdown 代码块。
@@ -128,8 +137,8 @@ JSON 字段：
   }
 
   const positioning = readString(parsed, "positioning") || fallback.positioning;
-  const markdown = readString(parsed, "markdown") || fallback.markdown;
-  const agentsMdContent = readString(parsed, "agentsMdContent") || fallback.agentsMdContent;
+  const markdown = appendOpenClawAccountIdentity(readString(parsed, "markdown") || fallback.markdown, account);
+  const agentsMdContent = appendOpenClawAccountIdentity(readString(parsed, "agentsMdContent") || fallback.agentsMdContent, account);
   const execGuide = readString(parsed, "execGuide") || fallback.execGuide;
   const strategyJson = JSON.stringify(readObject(parsed, "strategy") || safeJson(fallback.strategyJson), null, 2);
 
@@ -172,8 +181,9 @@ export async function regenerateStrategyFromReferenceResearchWithLlm(input: {
 - 当前产品模式是 Prompt + Command only，不允许真实发布、评论、点赞、收藏、关注或私信。
 - 不得抄袭参考账号，不得把参考账号素材/经历伪装成我方真实体验。
 - 必须写出“借鉴什么”和“如何避免同质化”。
-- 必须在完整策划案 Markdown 中增加“爆款正文文风库”章节，完整保留参考研究中的文风特点、适用范围、避免事项和案例。
+- 必须在完整策划案 Markdown 中增加“爆款正文文风库”章节，完整保留参考研究中的文风特点、适用范围、避免事项和案例；案例的标题、作者、URL 与“原文短摘录”必须保留，不能仅保留链接或改写为概括性标签。
 - 必须在 AGENTS.md 中保留精简版文风库及选择规则：每篇按内容类型、目标用户和内容目标选择一种主文风，必要时最多使用一种辅助文风；学习表达规律，不复制案例原句、个人经历或具体数据；商家账号不得伪装成普通消费者亲历。
+- 策划案 Markdown 和 AGENTS.md 都必须包含“OpenClaw 账号标识”章节，写明业务账号名称、OpenClaw 账号 ID（accountParam）以及唯一可用的 \`--account <accountParam>\` 参数。
 - 必须生成完整策划案 Markdown 和可直接保存为 profiles/<账号名>/AGENTS.md 的内容。
 - 只返回 JSON，不要 Markdown 代码块。
 
@@ -234,8 +244,8 @@ JSON 字段：
     data: {
       positioning: readString(parsed, "positioning") || input.fallback.positioning,
       strategyJson: JSON.stringify(readObject(parsed, "strategy") || safeJson(input.fallback.strategyJson), null, 2),
-      markdown: readString(parsed, "markdown") || input.fallback.markdown,
-      agentsMdContent: readString(parsed, "agentsMdContent") || input.fallback.agentsMdContent,
+      markdown: appendOpenClawAccountIdentity(readString(parsed, "markdown") || input.fallback.markdown, input.account),
+      agentsMdContent: appendOpenClawAccountIdentity(readString(parsed, "agentsMdContent") || input.fallback.agentsMdContent, input.account),
       execGuide: readString(parsed, "execGuide") || input.fallback.execGuide
     }
   };
@@ -413,9 +423,9 @@ export async function summarizeReferenceResearchWithLlm(input: {
 - 输出必须服务于生成我方账号的人设文件和策划案。
 - 必须优先提炼全国同类型爆款/高互动样本的规律；账号所在城市或本地样本只作为落地差异补充，不能让整体风格和内容策略被本地样本局限。
 - 必须保留研究报告中的爆款帖子来源署名、标题正文规律和图片风格分析；不得补造作者主页、关注数、粉丝数或作者定位。
-- 必须额外输出 writingStyleInsights：直接可读的 Markdown 文本，尽量归纳至少 5 种有明显差异的爆款正文文风；每种尽量列出至少 2 个来自研究原文的真实案例。每个案例必须包含标题、作者、URL、足以说明表达特征的短片段和借鉴点。
+- 必须额外输出 writingStyleInsights：直接可读的 Markdown 文本，尽量归纳至少 5 种有明显差异的爆款正文文风；每种尽量列出至少 2 个来自研究原文的真实案例。每个案例必须包含标题、作者、URL、\`原文短摘录\`和借鉴点。
 - writingStyleInsights 中每种文风写清适用内容类型和用户场景、叙述身份或读者感受、常见开场、信息组织与段落节奏、句子长短和口语程度、情绪浓度、建议/产品信息的自然植入、结尾互动方式，以及容易产生的 AI 味、硬广或同质化问题。
-- 案例片段仅用于说明文风，不复制大段正文；不得编造案例、作者、URL 或帖子事实。样本不足时明确说明，不强行凑数。writingStyleInsights 总长度不超过 6,000 个中文字符。
+- \`原文短摘录\`必须直接保留研究报告中已有的逐字摘录，不得改写成“研究提炼为”“大意是”等概括，也不得根据标题或链接补造原文；每条控制在 60-140 个中文字符，不复制完整正文或连续大段正文。若研究报告未提供合规的原文短摘录，明确写“未提供可引用原文短摘录”，不得编造。writingStyleInsights 总长度不超过 8,000 个中文字符。
 - 不得补造、推测或要求评论区结论；本次研究不使用评论数据。
 - 只返回 JSON，不要 Markdown 代码块。
 

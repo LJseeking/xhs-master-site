@@ -21,8 +21,13 @@ function extractWritingStyleInsights(referenceAccounts: unknown) {
   const text = String(referenceAccounts || "").trim();
   if (!text) return "";
 
-  const match = text.match(/(?:^|\n)##\s*爆款正文文风洞察\s*\n([\s\S]*?)(?=\n##\s|$)/);
-  return compactPromptText(match?.[1], 6000);
+  const heading = /(?:^|\n)##\s*爆款正文文风洞察\s*\n?/.exec(text);
+  if (!heading || heading.index === undefined) return "";
+
+  // 文风库内部同样使用二级标题（例如“## 1）体验日记型”）。
+  // 不能再把第一个内部标题误判为文风库的结束边界。
+  const content = text.slice(heading.index + heading[0].length);
+  return compactPromptText(content, 8000);
 }
 
 function buildReferenceStyleBrief(account: PromptAccount) {
@@ -99,7 +104,7 @@ function baseContext(input: {
 ## 爆款研究文风参考
 ${buildReferenceStyleBrief(account)}
 
-当上述内容包含“爆款正文文风洞察”时，必须实际参考其中的主文风来完成正文，模仿其开场切入、信息组织、句式节奏、口语程度、情绪浓度和互动方式；不得只把它当作背景资料而忽略。不得复制参考标题、正文句子、个人经历或具体数据。爆款研究中的“资料员”“运营”“服务型人格”等内部策略标签不得直接写入正文。若研究启发与账号人设、本篇任务或事实边界冲突，以账号人设、本篇任务和事实边界为准。
+当上述内容包含“爆款正文文风洞察”时，必须实际参考其中的主文风来完成正文，模仿其开场切入、信息组织、句式节奏、口语程度、情绪浓度和互动方式；案例中的“原文短摘录”是语言样本，必须优先学习其表达节奏和口语方式，而不是只参考抽象总结。不得复制参考标题、正文句子、个人经历或具体数据；需要基于我方已核验事实重新表达。爆款研究中的“资料员”“运营”“服务型人格”等内部策略标签不得直接写入正文。若研究启发与账号人设、本篇任务或事实边界冲突，以账号人设、本篇任务和事实边界为准。
 
 ## 已沉淀专家规则
 ${expertRules || "暂无已保存规则；按账号策划案和本篇任务生成。"}`;
