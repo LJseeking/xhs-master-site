@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { buildTaskPrompt } from "@/lib/prompt";
+import { buildTaskPrompt, hasUsableWritingStyleLibrary } from "@/lib/prompt";
 import { formatExpertRulesForPrompt } from "@/lib/expertLearning";
 import { buildVideoDraftTask } from "@/lib/videoPrompts";
 
@@ -98,6 +98,9 @@ export async function POST(request: Request, _context: { params: { id: string } 
   if (!noteTask || !account || !weeklyPlan) return NextResponse.json({ error: "缺少任务上下文" }, { status: 400 });
   if (!String(account.accountParam || "").trim()) {
     return NextResponse.json({ error: "当前账号未配置 OpenClaw skill 账号参数，无法生成草稿箱任务。" }, { status: 400 });
+  }
+  if (!hasUsableWritingStyleLibrary(account.referenceAccounts)) {
+    return NextResponse.json({ error: "当前账号缺少可用的爆款正文文风库。请先完成爆款研究，并按“### 文风：唯一名称”格式保存研究结果。" }, { status: 400 });
   }
 
   const content = buildTaskPrompt({

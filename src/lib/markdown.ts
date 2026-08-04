@@ -47,7 +47,7 @@ ${plan.noteTasks
 - 目标用户：${task.targetUser}
 - 用户痛点：${task.painPoint}
 - 核心观点：${task.coreView}
-- 正文结构：${task.bodyStructure}
+- 可写事实与核心观点：${task.coreView}
 - 推荐素材：${task.recommendedAssets}
 - 封面方向：${task.coverCopyDirection}
 - 评论区钩子：${task.commentHook}

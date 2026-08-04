@@ -42,7 +42,6 @@ type WeeklyTaskSeed = {
   targetUser: string;
   painPoint: string;
   coreView: string;
-  bodyStructure: string;
   type: "image_text" | "video_text";
   requiredMaterials: string;
   recommendedAssets: string;
@@ -313,7 +312,7 @@ export async function generateWeeklyTasksWithBrowserLlm(input: {
   assets: unknown[];
   weeklyPlan: { id: number };
   weeklyInput: WeeklyPlanInput;
-  fallbackTasks: WeeklyTaskSeed[];
+  taskCount: number;
 }): Promise<{
   usedLlm: boolean;
   error?: string;
@@ -321,7 +320,7 @@ export async function generateWeeklyTasksWithBrowserLlm(input: {
 }> {
   const status = getBrowserLlmStatus();
   if (!status.enabled) {
-    return { usedLlm: false, data: input.fallbackTasks, error: "AI 未启用，已使用内置模板生成。" };
+    throw new Error("AI 未启用，无法生成本周内容计划。");
   }
 
   const recentTopicGroups = input.weeklyInput.recentTopicGroups || [];
@@ -366,17 +365,15 @@ export async function generateWeeklyTasksWithBrowserLlm(input: {
   const prompt = `请根据账号策略、本周目标和素材情况，生成一周小红书 note_tasks。
 
 要求：
-- 生成 ${input.fallbackTasks.length} 篇。
-- 其中必须有 ${Math.max(0, Math.min(input.weeklyInput.videoCount || 0, input.fallbackTasks.length))} 篇 type 为 video_text，其余为 image_text；视频任务应优先选择适合动态演示、空间动线、过程或氛围表达的选题。
+- 生成 ${input.taskCount} 篇。
+- 其中必须有 ${Math.max(0, Math.min(input.weeklyInput.videoCount || 0, input.taskCount))} 篇 type 为 video_text，其余为 image_text；视频任务应优先选择适合动态演示、空间动线、过程或氛围表达的选题。
 - 必须优先阅读并遵循输入中的完整 strategy；账号定位、人设、目标用户、内容栏目、标题封面策略、商业化路径和风险边界都应以 strategy 为主要依据，不能只依据账号类型套用通用模板。
 - 如果 weeklyInput.weeklyFocus 非空，它代表用户主动指定的本周重点，应作为本周选题的最高优先级；围绕该重点拆分具体且不重复的任务，同时不得违背 strategy 中的真实性和风险边界。
 - 如果 weeklyInput.weeklyFocus 为空，则以完整 strategy 和本周运营目标为主要依据生成选题。
 - 当前执行模式是只生成计划、Prompt 和命令建议，不允许真实发布或互动。
-- 每篇任务必须具体到用户痛点、核心观点、正文结构、图片或视频素材要求、评论区钩子。
-- bodyStructure 是无顺序、可省略的候选内容要点和事实范围，不是正文结构流程；每项可以独立采用或省略，不得要求逐项覆盖。
-- bodyStructure 不得使用“开头、接着、然后、最后”等顺序词，不得使用箭头、编号或其他固定顺序表达；不得描述语气、文风、开场句式或段落节奏。
-- bodyStructure 不得出现“素材观察”“用于测试”“本篇承担”“不能当攻略”“需要补齐资料”等内部策划话术，也不得使用含义相同的改写。
-- 信息不足只用于约束不能编造的事实，不得把“缺少资料”“参数不全”“不能作为完整攻略”等说明设计成正文开头；需要提醒时，转换成面向读者的自然行动建议，例如“出发前建议确认……”。
+- 每篇任务必须具体到用户痛点、核心观点、可写事实与素材范围、图片或视频素材要求、评论区钩子。
+- 不要输出正文结构、段落顺序、开场方式、文风、句式节奏或任何“先/再/最后”的行文指令。
+- 信息不足只用于标注不可编造的事实或待确认项，不要把资料缺口设计成正文内容。
 - 推荐素材只能来自输入素材或明确写“素材缺口”，禁止伪造真实素材。
 - 只返回 JSON，不要 Markdown 代码块。${dedupRequirements}
 
@@ -405,7 +402,6 @@ JSON 字段：
       "targetUser": "",
       "painPoint": "",
       "coreView": "",
-      "bodyStructure": "",
       "type": "image_text 或 video_text",
       "requiredMaterials": "",
       "recommendedAssets": "",
@@ -427,39 +423,36 @@ JSON 字段：
       ? ((parsed as Record<string, unknown>).tasks as Array<Record<string, unknown>>)
       : [];
 
-    if (!rawTasks.length) {
-      return { usedLlm: false, data: input.fallbackTasks, error: "大模型未返回 tasks 数组，已使用内置模板。" };
-    }
+    if (rawTasks.length !== input.taskCount) throw new Error(`大模型返回任务数量异常：期望 ${input.taskCount} 篇，实际 ${rawTasks.length} 篇。`);
 
-    const tasks = rawTasks.slice(0, input.fallbackTasks.length).map((task, index) => {
-      const fallback = input.fallbackTasks[index] ?? input.fallbackTasks[0];
+    const tasks = rawTasks.map((task, index) => {
+      const required = (field: string) => {
+        const value = String(task[field] ?? "").trim();
+        if (!value) throw new Error(`第 ${index + 1} 篇任务缺少 ${field}。`);
+        return value;
+      };
       return {
-        accountId: input.account.id || fallback.accountId,
+        accountId: input.account.id || 0,
         weeklyPlanId: input.weeklyPlan.id,
-        publishAt: stringFrom(task.publishAt, fallback.publishAt),
-        contentType: stringFrom(task.contentType, fallback.contentType),
-        contentGoal: stringFrom(task.contentGoal, fallback.contentGoal),
-        topicTitle: stringFrom(task.topicTitle, fallback.topicTitle),
-        targetUser: stringFrom(task.targetUser, fallback.targetUser),
-        painPoint: stringFrom(task.painPoint, fallback.painPoint),
-        coreView: stringFrom(task.coreView, fallback.coreView),
-        bodyStructure: stringFrom(task.bodyStructure, fallback.bodyStructure),
+        publishAt: required("publishAt"),
+        contentType: required("contentType"),
+        contentGoal: required("contentGoal"),
+        topicTitle: required("topicTitle"),
+        targetUser: required("targetUser"),
+        painPoint: required("painPoint"),
+        coreView: required("coreView"),
         type: task.type === "video_text" ? "video_text" as const : "image_text" as const,
-        requiredMaterials: stringFrom(task.requiredMaterials, fallback.requiredMaterials),
-        recommendedAssets: stringFrom(task.recommendedAssets, fallback.recommendedAssets),
-        coverCopyDirection: stringFrom(task.coverCopyDirection, fallback.coverCopyDirection),
-        commentHook: stringFrom(task.commentHook, fallback.commentHook),
-        expectedGoal: stringFrom(task.expectedGoal, fallback.expectedGoal),
+        requiredMaterials: required("requiredMaterials"),
+        recommendedAssets: required("recommendedAssets"),
+        coverCopyDirection: required("coverCopyDirection"),
+        commentHook: required("commentHook"),
+        expectedGoal: required("expectedGoal"),
         status: "待生成Prompt"
       };
     });
 
     return { usedLlm: true, data: normalizeWeeklyTaskMedia(tasks, input.weeklyInput.videoCount || 0) };
   } catch (error) {
-    return {
-      usedLlm: false,
-      data: input.fallbackTasks,
-      error: error instanceof Error ? error.message : "浏览器端一周计划生成失败。"
-    };
+    throw new Error(error instanceof Error ? error.message : "浏览器端一周计划生成失败。");
   }
 }

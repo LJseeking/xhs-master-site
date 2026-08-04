@@ -37,7 +37,7 @@ function compactList(value: string, fallback: string, maxItems = 3, itemMax = 34
 
 function noteBodyDraft(noteTask?: InteractionNoteTask | null) {
   const rawDraft = noteTask?.bodyDraft?.trim();
-  if (!rawDraft) return "尚未保存正文草稿，请以选题、观点和正文结构为准。";
+  if (!rawDraft) return "尚未保存正文草稿，请以选题、观点和可用事实为准。";
 
   try {
     const parsed = JSON.parse(rawDraft) as Record<string, unknown>;
@@ -73,7 +73,7 @@ function buildNoteSummary(noteTask?: InteractionNoteTask | null) {
     `目标用户：${compactText(noteTask.targetUser, "未设置", 70)}`,
     `痛点：${compactText(noteTask.painPoint, "未设置", 90)}`,
     `观点：${compactText(noteTask.coreView, "未设置", 100)}`,
-    `正文结构：${compactText(noteTask.bodyStructure, "未设置", 300)}`,
+    `核心观点：${compactText(noteTask.coreView, "未设置", 300)}`,
     `评论钩子：${compactText(noteTask.commentHook, "未设置", 80)}`,
     `正文草稿：\n${noteBodyDraft(noteTask)}`
   ].join("\n- ");

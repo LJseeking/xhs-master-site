@@ -22,7 +22,6 @@ type NoteTaskSeed = {
   targetUser: string;
   painPoint: string;
   coreView: string;
-  bodyStructure: string;
   type: "image_text" | "video_text";
   requiredMaterials: string;
   recommendedAssets: string;
@@ -257,10 +256,10 @@ export async function generateWeeklyTasksWithLlm(input: {
   assets: Asset[];
   weeklyPlan: WeeklyPlan;
   weeklyInput: WeeklyPlanInput;
-  fallbackTasks: NoteTaskSeed[];
+  taskCount: number;
 }): Promise<LlmResult<NoteTaskSeed[]>> {
   const status = getLlmStatus();
-  if (!status.enabled) return { usedLlm: false, data: input.fallbackTasks, error: "AI 未启用，已使用内置模板生成。" };
+  if (!status.enabled) throw new Error("AI 未启用，无法生成本周内容计划。");
 
   const recentTopicGroups = input.weeklyInput.recentTopicGroups || [];
   const weeklyInputContext = {
@@ -304,17 +303,15 @@ export async function generateWeeklyTasksWithLlm(input: {
   const prompt = `请根据账号策略、本周目标和素材情况，生成一周小红书 note_tasks。
 
 要求：
-- 生成 ${input.fallbackTasks.length} 篇。
-- 其中必须有 ${Math.max(0, Math.min(input.weeklyInput.videoCount || 0, input.fallbackTasks.length))} 篇 type 为 video_text，其余为 image_text。
+- 生成 ${input.taskCount} 篇。
+- 其中必须有 ${Math.max(0, Math.min(input.weeklyInput.videoCount || 0, input.taskCount))} 篇 type 为 video_text，其余为 image_text。
 - 必须优先阅读并遵循输入中的完整 strategy；账号定位、人设、目标用户、内容栏目、标题封面策略、商业化路径和风险边界都应以 strategy 为主要依据，不能只依据账号类型套用通用模板。
 - 如果 weeklyInput.weeklyFocus 非空，它代表用户主动指定的本周重点，应作为本周选题的最高优先级；围绕该重点拆分具体且不重复的任务，同时不得违背 strategy 中的真实性和风险边界。
 - 如果 weeklyInput.weeklyFocus 为空，则以完整 strategy 和本周运营目标为主要依据生成选题。
 - 当前执行模式是只生成计划、Prompt 和命令建议，不允许真实发布或互动。
-- 每篇任务必须具体到用户痛点、核心观点、正文结构、图片或视频素材要求、评论区钩子。
-- bodyStructure 是无顺序、可省略的候选内容要点和事实范围，不是正文结构流程；每项可以独立采用或省略，不得要求逐项覆盖。
-- bodyStructure 不得使用“开头、接着、然后、最后”等顺序词，不得使用箭头、编号或其他固定顺序表达；不得描述语气、文风、开场句式或段落节奏。
-- bodyStructure 不得出现“素材观察”“用于测试”“本篇承担”“不能当攻略”“需要补齐资料”等内部策划话术，也不得使用含义相同的改写。
-- 信息不足只用于约束不能编造的事实，不得把“缺少资料”“参数不全”“不能作为完整攻略”等说明设计成正文开头；需要提醒时，转换成面向读者的自然行动建议，例如“出发前建议确认……”。
+- 每篇任务必须具体到用户痛点、核心观点、可写事实与素材范围、图片或视频素材要求、评论区钩子。
+- 不要输出正文结构、段落顺序、开场方式、文风、句式节奏或任何“先/再/最后”的行文指令。
+- 信息不足只用于标注不可编造的事实或待确认项，不要把资料缺口设计成正文内容。
 - 推荐素材只能来自输入素材或明确写“素材缺口”，禁止伪造真实素材。
 - 只返回 JSON，不要 Markdown 代码块。${dedupRequirements}
 
@@ -351,7 +348,6 @@ JSON 字段：
       "targetUser": "",
       "painPoint": "",
       "coreView": "",
-      "bodyStructure": "",
       "type": "image_text 或 video_text",
       "requiredMaterials": "",
       "recommendedAssets": "",
@@ -368,36 +364,37 @@ JSON 字段：
     input: prompt
   });
 
-  if (!response.ok) return { usedLlm: false, data: input.fallbackTasks, error: response.error };
+  if (!response.ok) throw new Error(response.error || "AI 未能生成本周内容计划。");
 
   const parsed = extractJson(response.text);
   const rawTasks = parsed && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).tasks)
     ? ((parsed as Record<string, unknown>).tasks as Array<Record<string, unknown>>)
     : [];
 
-  if (!rawTasks.length) {
-    return { usedLlm: false, data: input.fallbackTasks, error: "大模型未返回 tasks 数组，已使用内置模板。" };
-  }
+  if (rawTasks.length !== input.taskCount) throw new Error(`大模型返回任务数量异常：期望 ${input.taskCount} 篇，实际 ${rawTasks.length} 篇。`);
 
-  const tasks = rawTasks.slice(0, input.fallbackTasks.length).map((task, index) => {
-    const fallback = input.fallbackTasks[index] ?? input.fallbackTasks[0];
+  const tasks = rawTasks.map((task, index) => {
+    const required = (field: string) => {
+      const value = String(task[field] ?? "").trim();
+      if (!value) throw new Error(`第 ${index + 1} 篇任务缺少 ${field}。`);
+      return value;
+    };
     return {
       accountId: input.account.id,
       weeklyPlanId: input.weeklyPlan.id,
-      publishAt: stringFrom(task.publishAt, fallback.publishAt),
-      contentType: stringFrom(task.contentType, fallback.contentType),
-      contentGoal: stringFrom(task.contentGoal, fallback.contentGoal),
-      topicTitle: stringFrom(task.topicTitle, fallback.topicTitle),
-      targetUser: stringFrom(task.targetUser, fallback.targetUser),
-      painPoint: stringFrom(task.painPoint, fallback.painPoint),
-      coreView: stringFrom(task.coreView, fallback.coreView),
-      bodyStructure: stringFrom(task.bodyStructure, fallback.bodyStructure),
+      publishAt: required("publishAt"),
+      contentType: required("contentType"),
+      contentGoal: required("contentGoal"),
+      topicTitle: required("topicTitle"),
+      targetUser: required("targetUser"),
+      painPoint: required("painPoint"),
+      coreView: required("coreView"),
       type: task.type === "video_text" ? "video_text" as const : "image_text" as const,
-      requiredMaterials: stringFrom(task.requiredMaterials, fallback.requiredMaterials),
-      recommendedAssets: stringFrom(task.recommendedAssets, fallback.recommendedAssets),
-      coverCopyDirection: stringFrom(task.coverCopyDirection, fallback.coverCopyDirection),
-      commentHook: stringFrom(task.commentHook, fallback.commentHook),
-      expectedGoal: stringFrom(task.expectedGoal, fallback.expectedGoal),
+      requiredMaterials: required("requiredMaterials"),
+      recommendedAssets: required("recommendedAssets"),
+      coverCopyDirection: required("coverCopyDirection"),
+      commentHook: required("commentHook"),
+      expectedGoal: required("expectedGoal"),
       status: "待生成Prompt"
     };
   });
@@ -424,7 +421,7 @@ export async function summarizeReferenceResearchWithLlm(input: {
 - 必须优先提炼全国同类型爆款/高互动样本的规律；账号所在城市或本地样本只作为落地差异补充，不能让整体风格和内容策略被本地样本局限。
 - 必须保留研究报告中的爆款帖子来源署名、标题正文规律和图片风格分析；不得补造作者主页、关注数、粉丝数或作者定位。
 - 必须额外输出 writingStyleInsights：直接可读的 Markdown 文本，尽量归纳至少 5 种有明显差异的爆款正文文风；每种尽量列出至少 2 个来自研究原文的真实案例。每个案例必须包含标题、作者、URL、\`原文短摘录\`和借鉴点。
-- writingStyleInsights 中每种文风写清适用内容类型和用户场景、叙述身份或读者感受、常见开场、信息组织与段落节奏、句子长短和口语程度、情绪浓度、建议/产品信息的自然植入、结尾互动方式，以及容易产生的 AI 味、硬广或同质化问题。
+- writingStyleInsights 中每种文风必须使用三级标题 \`### 文风：唯一名称\` 独立成块，并写清适用内容类型和用户场景、叙述身份或读者感受、结构性仿写规律、常见开场、信息组织与段落节奏、句子长短和口语程度、情绪浓度、建议/产品信息的自然植入、结尾互动方式，以及容易产生的 AI 味、硬广或同质化问题。
 - \`原文短摘录\`必须直接保留研究报告中已有的逐字摘录，不得改写成“研究提炼为”“大意是”等概括，也不得根据标题或链接补造原文；每条控制在 60-140 个中文字符，不复制完整正文或连续大段正文。若研究报告未提供合规的原文短摘录，明确写“未提供可引用原文短摘录”，不得编造。writingStyleInsights 总长度不超过 8,000 个中文字符。
 - 不得补造、推测或要求评论区结论；本次研究不使用评论数据。
 - 只返回 JSON，不要 Markdown 代码块。

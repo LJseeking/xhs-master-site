@@ -340,7 +340,7 @@ export async function generateImageAutoSelectionWithLlm(input: {
 - 只能选择候选素材中存在的 assetKey，不能创造、重复或遗漏 assetKey。
 - images 必须恰好包含 ${input.imageCount} 项，order 必须从 1 连续到 ${input.imageCount}。
 - 第 1 张固定作为封面，优先匹配封面方向、主题识别度和竖版可用性。
-- 其余图片按照笔记正文结构安排叙事顺序，每张图片承担不同且明确的职责。
+- 其余图片按照本篇主题、素材事实和读者理解需要安排，每张图片承担不同且明确的职责；不得反向限定正文的叙事顺序。
 - 选择依据只能来自 tags、suitableTypes、filePath、location、shotAt、sourceType 和尺寸等文字元数据。
 - reason 必须写清素材标签与本篇笔记信息的匹配关系，不得写成已经识别了真实画面。
 - 不要生成图片精修 Prompt；本次只负责选图和排序。

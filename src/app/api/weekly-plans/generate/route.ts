@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { buildNoteTasks, clampWeeklyFrequency, normalizeWeeklyRatio } from "@/lib/weeklyPlan";
+import { clampWeeklyFrequency, normalizeWeeklyRatio } from "@/lib/weeklyPlan";
 import { generateWeeklyTasksWithLlm } from "@/lib/llm";
 import { collectRecentWeeklyTopicGroups } from "@/lib/weeklyTopicHistory";
 
@@ -29,26 +29,32 @@ export async function POST(request: Request) {
   };
 
   const weeklyFocus = String(body.weeklyFocus || "").trim();
-  const fallbackWeeklyInput = { ...body, frequency, ratio };
+  const weeklyPlanInput = { ...body, frequency, ratio };
   const recentTopicGroups = weeklyFocus
     ? []
     : collectRecentWeeklyTopicGroups(account.weeklyPlans || [], plan.weekStart);
   const weeklyInput = {
-    ...fallbackWeeklyInput,
+    ...weeklyPlanInput,
     weeklyFocus,
     recentTopicGroups
   };
-  const fallbackTasks = buildNoteTasks(account, account.strategy, account.assets || [], fallbackWeeklyInput, plan);
-  const llmResult = await generateWeeklyTasksWithLlm({
-    account,
-    strategy: account.strategy,
-    assets: account.assets || [],
-    weeklyPlan: plan,
-    weeklyInput,
-    fallbackTasks
-  });
-  return NextResponse.json({
-    ...plan,
-    noteTasks: llmResult.data.map((task, index) => ({ ...task, id: Date.now() + index }))
-  });
+  try {
+    const llmResult = await generateWeeklyTasksWithLlm({
+      account,
+      strategy: account.strategy,
+      assets: account.assets || [],
+      weeklyPlan: plan,
+      weeklyInput,
+      taskCount: frequency
+    });
+    return NextResponse.json({
+      ...plan,
+      noteTasks: llmResult.data.map((task, index) => ({ ...task, id: Date.now() + index }))
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "生成本周内容计划失败。" },
+      { status: 422 }
+    );
+  }
 }
