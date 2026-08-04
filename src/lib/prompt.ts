@@ -10,12 +10,32 @@ type PromptAccount = Account & {
   }>;
 };
 
+type PromptNoteTask = NoteTask & { type?: "image_text" | "video_text"; requiredMaterials?: string; plan?: string };
+
 function compactPromptText(value: unknown, maxLength = 800) {
   const text = String(value || "").trim();
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 }
 
+function extractWritingStyleInsights(referenceAccounts: unknown) {
+  const text = String(referenceAccounts || "").trim();
+  if (!text) return "";
+
+  const heading = /(?:^|\n)##\s*爆款正文文风洞察\s*\n?/.exec(text);
+  if (!heading || heading.index === undefined) return "";
+
+  // 文风库内部同样使用二级标题（例如“## 1）体验日记型”）。
+  // 不能再把第一个内部标题误判为文风库的结束边界。
+  const content = text.slice(heading.index + heading[0].length);
+  return compactPromptText(content, 8000);
+}
+
 function buildReferenceStyleBrief(account: PromptAccount) {
+  const writingStyleInsights = extractWritingStyleInsights(account.referenceAccounts);
+  if (writingStyleInsights) {
+    return `以下为账号已沉淀的爆款正文文风洞察。必须根据本篇主题、账号身份和目标用户，从中选择一种主文风；必要时最多使用一种辅助文风，并模仿其表达规律：\n${writingStyleInsights}`;
+  }
+
   const latest = account.referenceResearches?.[0];
   if (!latest) {
     const persistedResearch = compactPromptText(account.referenceAccounts, 1600);
@@ -36,7 +56,7 @@ export function buildTaskPrompt(input: {
   account: PromptAccount;
   strategy: AccountStrategy | null;
   weeklyPlan: WeeklyPlan;
-  noteTask: NoteTask;
+  noteTask: PromptNoteTask;
   expertRules?: string;
 }) {
   const { account, strategy, weeklyPlan, noteTask, expertRules } = input;
@@ -48,11 +68,12 @@ function baseContext(input: {
   account: PromptAccount;
   strategySummary: string;
   weeklyPlan: WeeklyPlan;
-  noteTask: NoteTask;
+  noteTask: PromptNoteTask;
   imagePanelName: string;
   expertRules?: string;
 }) {
   const { account, strategySummary, weeklyPlan, noteTask, imagePanelName, expertRules } = input;
+  const isVideo = noteTask.type === "video_text";
   return `## 模式
 生成可直接填写到小红书发布页的标题和正文，但只允许保存到草稿箱，严禁真实发布和互动。
 
@@ -60,9 +81,9 @@ function baseContext(input: {
 --account ${account.accountParam}
 
 ## 上下文
-- 账号图片素材目录：assets/${account.accountParam}/
-- 图片任务输出：.openclaw_tasks/xhs-image-task-${noteTask.id}/image-paths.txt
-- 图片处理：先在“${imagePanelName}”完成图片任务；本阶段只读取其成品图片清单，不重新生成或替换图片。
+- 账号素材目录：assets/${account.accountParam}/
+- ${isVideo ? "视频任务输出：.openclaw_tasks/xhs-video-task-" + noteTask.id + "/video-path.txt" : "图片任务输出：.openclaw_tasks/xhs-image-task-" + noteTask.id + "/image-paths.txt"}
+- ${isVideo ? "视频处理：先在“视频方案”完成视频任务；本阶段只读取最终视频路径，不重新生成或替换视频。" : `图片处理：先在“${imagePanelName}”完成图片任务；本阶段只读取其成品图片清单，不重新生成或替换图片。`}
 - 账号定位：${strategySummary}
 - 账号对外人设：${account.personaBase || "真实、具体、克制，以能够核验的信息帮助用户做判断"}
 - 本周目标：${weeklyPlan.goal}
@@ -80,10 +101,10 @@ function baseContext(input: {
 - 评论钩子：${noteTask.commentHook}
 - 禁忌：${weeklyPlan.taboos || account.taboos || "遵守 AGENTS.md 禁区"}
 
-## 爆款研究风格摘要
+## 爆款研究文风参考
 ${buildReferenceStyleBrief(account)}
 
-只学习上述摘要中的标题节奏、信息密度、情绪表达和内容组织方式；不得复制参考标题、正文句子、个人经历或具体数据。爆款研究中的“资料员”“运营”“服务型人格”等内部策略标签不得直接写入正文。若研究启发与账号人设、本篇任务或事实边界冲突，以账号人设、本篇任务和事实边界为准。
+当上述内容包含“爆款正文文风洞察”时，必须实际参考其中的主文风来完成正文，模仿其开场切入、信息组织、句式节奏、口语程度、情绪浓度和互动方式；案例中的“原文短摘录”是语言样本，必须优先学习其表达节奏和口语方式，而不是只参考抽象总结。不得复制参考标题、正文句子、个人经历或具体数据；需要基于我方已核验事实重新表达。爆款研究中的“资料员”“运营”“服务型人格”等内部策略标签不得直接写入正文。若研究启发与账号人设、本篇任务或事实边界冲突，以账号人设、本篇任务和事实边界为准。
 
 ## 已沉淀专家规则
 ${expertRules || "暂无已保存规则；按账号策划案和本篇任务生成。"}`;
@@ -191,12 +212,13 @@ function buildModeTaskPrompt(input: {
   account: PromptAccount;
   strategySummary: string;
   weeklyPlan: WeeklyPlan;
-  noteTask: NoteTask;
+  noteTask: PromptNoteTask;
   expertRules?: string;
 }) {
   const mode = accountVisualMode(input.account.accountType);
   const copy = promptModeCopy[mode];
   const imageCountLine = mode === "food" ? "图集默认 6 张" : "图集默认 5 张";
+  const isVideo = input.noteTask.type === "video_text";
   const weddingAccount = isWeddingAccount(input.account);
   const promptTitle = weddingAccount ? "婚礼服务小红书笔记草稿 Prompt（发布精简版）" : copy.title;
   const imagePanelName = weddingAccount ? "婚礼图片创作" : copy.imagePanelName;
@@ -219,23 +241,22 @@ function buildModeTaskPrompt(input: {
 
 ${baseContext({ ...input, imagePanelName })}
 
-## 本篇正文结构
+## 本篇候选内容与事实边界
 - 内容品类：${structure.categoryName}
 - 内容原型：${structure.archetypeName}
 - 本篇核心作用：${structure.focus}
-- 主结构：${structure.primaryStructure}
-- 结构来源：${structure.structureSource === "note_task" ? "本篇 noteTask.bodyStructure 仅作为内部策划提纲；提取主题、事实和信息顺序后转换为读者视角，不得复制其内部措辞" : "本篇缺少 bodyStructure，使用品类结构库兜底"}
-- 可选开场：${structure.openingOptions.join("；")}
-- 按需补充：${structure.optionalInformation.join("、")}。只写与本篇主题直接相关且已经核验的信息，不要求全部补齐。
+- 候选内容：${structure.contentCandidates.join("；")}
+- 候选来源：${structure.structureSource === "note_task" ? "本篇 noteTask.bodyStructure，仅作为内部候选内容；不得复制其中的内部措辞" : "本篇缺少有效 bodyStructure，使用品类候选内容池兜底"}
+- 按需补充：${structure.optionalInformation.join("、")}。只写与本篇主题直接相关且已经核验的信息。
 - 避免：${structure.avoid.join("；")}
 
-不要固定使用“为什么值得去/值得买/值得住”开头，也不要机械重复“先……再……最后……”。开场方式必须服务于本篇内容目标，不要为了变化而强行变化。
+候选内容没有先后顺序，也没有逐项覆盖要求。根据所选爆款文风、图片内容和读者阅读体验自行决定开场、信息顺序、段落节奏和结尾；不得按照候选项原始排列顺序逐条展开。不要固定使用“为什么值得去/值得买/值得住”开头，也不要机械重复“先……再……最后……”。
 
 ## 品类与事实边界
 - ${copy.styleRules.join("\n- ")}
 ${weddingRules.length ? `- ${weddingRules.join("\n- ")}\n` : ""}- 正文控制在 300-600 中文字；最多 6 个短段落。
-- ${imageCountLine}仅作为策划参考，实际以 image-paths.txt 中的成品图片数量和顺序为准。
-- 正文必须与整组图片表达一致，但不要机械地逐图解说，也不要求每张图对应一个独立句子。
+- ${isVideo ? "视频时长和镜头顺序以 video-path.txt 指向的最终视频为准。" : `${imageCountLine}仅作为策划参考，实际以 image-paths.txt 中的成品图片数量和顺序为准。`}
+- 正文必须与${isVideo ? "最终视频" : "整组图片"}表达一致，${isVideo ? "但不要机械复述每个镜头。" : "但不要机械地逐图解说，也不要求每张图对应一个独立句子。"}
 - 使用当前账号设定的对外身份直接面向目标用户表达，语言自然、具体、有生活感，不要像硬广。
 - 账号身份资料只用于理解定位；如果其中含有“客户”“运营账号”“需要通过素材”等内部描述，必须转换成直接面对用户的自然表达，不得原样写进正文。
 - 禁止出现“作为运营人员”“作为 AI”“本篇内容”“这篇笔记将介绍”“我们的内容策略”“接下来生成”等幕后创作语言。

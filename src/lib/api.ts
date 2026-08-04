@@ -63,9 +63,77 @@ export interface BackendAccountDetail {
   profileVersion?: number;
   assets?: BackendAsset[];
   weeklyPlans?: BackendWeeklyPlan[];
+  postReviews?: BackendPostReview[];
+  expertRules?: BackendExpertRule[];
   createdAt: string;
   updatedAt: string;
 }
+
+export type BackendPostReviewInput = {
+  postTitle: string;
+  postUrl: string;
+  publishedAt: string;
+  actualContent: string;
+  metrics: string;
+  comments: string;
+  expertFeedback: string;
+  editComparison: string;
+  subjective: string;
+  distillGoal: string;
+};
+
+export type BackendExpertRule = {
+  id: number;
+  accountId?: number;
+  postReviewId?: number;
+  accountType: string;
+  module: string;
+  rule: string;
+  positiveExample?: string;
+  negativeExample?: string;
+  reason?: string;
+  source: string;
+  applicableWhen?: string;
+  notApplicableWhen?: string;
+  nextTest?: string;
+  status: string;
+  enabled?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+export type BackendPostReview = {
+  id: number;
+  accountId?: number;
+  noteTaskId: number | null;
+  input: BackendPostReviewInput;
+  summary: string;
+  evidenceAssessment: string;
+  aiModel: string;
+  status: string;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+export type SavePostReviewResultPayload = {
+  accountId: number;
+  noteTaskId?: number;
+  input: BackendPostReviewInput;
+  summary: string;
+  evidenceAssessment: string;
+  aiModel: string;
+  rules: Array<{
+    module: string;
+    rule: string;
+    positiveExample: string;
+    negativeExample: string;
+    reason: string;
+    source: string;
+    applicableWhen: string;
+    notApplicableWhen: string;
+    nextTest: string;
+  }>;
+};
 
 export interface BackendAsset {
   id: number;
@@ -90,7 +158,8 @@ export interface BackendAsset {
 }
 
 export interface BackendNoteTask {
-  id: number;
+  id?: number;
+  type: "image_text" | "video_text";
   publishAt: string;
   contentType: string;
   contentGoal: string;
@@ -99,20 +168,20 @@ export interface BackendNoteTask {
   painPoint: string;
   coreView: string;
   bodyStructure: string;
-  requiredImages: string;
+  requiredMaterials: string;
   recommendedAssets: string;
   coverCopyDirection: string;
   commentHook: string;
   expectedGoal: string;
   status: string;
   bodyDraft?: string;
-  imagePlan?: string;
+  plan?: string;
   createdAt?: string;
   updatedAt?: string;
 }
 
 export interface BackendWeeklyPlan {
-  id: number;
+  id?: number;
   weekStart: string;
   theme: string;
   goal: string;
@@ -381,6 +450,40 @@ export async function saveBackendNoteTask(accountId: number, weeklyPlanId: numbe
     throw new Error(res.message || "保存单篇内容失败");
   }
   return res.data;
+}
+
+export async function saveBackendPostReviewResult(payload: SavePostReviewResultPayload) {
+  const res = await authRequest<{ postReview: BackendPostReview; rules: BackendExpertRule[] }>("/postReview/v1/saveResult", {
+    method: "POST",
+    body: payload as unknown as Record<string, unknown>
+  });
+  if (!res.status || !res.data?.postReview) {
+    throw new Error(res.message || "保存专家复盘结果失败");
+  }
+  return res.data;
+}
+
+export async function setBackendExpertRulesEnabled(accountId: number, enabledRuleIds: number[]) {
+  const normalizedAccountId = Number(accountId);
+  const normalizedRuleIds = Array.from(new Set(
+    enabledRuleIds
+      .map((id) => Number(id))
+      .filter((id) => Number.isSafeInteger(id) && id > 0)
+  ));
+  if (!Number.isSafeInteger(normalizedAccountId) || normalizedAccountId <= 0) {
+    throw new Error("账号 ID 无效，无法保存规则选择。");
+  }
+  if (normalizedRuleIds.length !== enabledRuleIds.length) {
+    throw new Error("规则 ID 无效，无法保存规则选择。");
+  }
+  const res = await authRequest<{ rules?: BackendExpertRule[]; expertRules?: BackendExpertRule[] } | BackendExpertRule[]>("/expertRule/v1/setEnabled", {
+    method: "POST",
+    body: { accountId: normalizedAccountId, enabledRuleIds: normalizedRuleIds }
+  });
+  if (!res.status || !res.data) {
+    throw new Error(res.message || "保存规则选择失败");
+  }
+  return Array.isArray(res.data) ? res.data : res.data.rules || res.data.expertRules || [];
 }
 
 export async function syncBackendAccounts() {

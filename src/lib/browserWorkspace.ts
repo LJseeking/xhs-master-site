@@ -9,11 +9,11 @@ export type BrowserWorkspaceSnapshot = {
   selectedId?: number | null;
   promptResults?: Record<number, unknown>;
   imagePromptResults?: Record<number, unknown>;
+  videoPromptResults?: Record<number, unknown>;
   batchImagePostResults?: Record<number, unknown>;
   referenceDraft?: Record<string, unknown>;
   imageStyleDraft?: Record<string, unknown>;
   interactionDraft?: Record<string, unknown>;
-  postReviewPrompt?: string;
   industryLearningDraft?: Record<string, unknown>;
 };
 

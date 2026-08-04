@@ -487,7 +487,7 @@ async function buildImagePromptResult(body: any, requestId: string) {
   const styleBrief = styleBriefFromStudy(latestImageStudy);
   const fallbackBrief = buildCompactImageStyleBrief(account, latestReference);
   const resolvedStyleBrief = styleBrief.length ? styleBrief : fallbackBrief;
-  const expertRules = formatExpertRulesForPrompt(account.expertRules || []);
+  const expertRules = formatExpertRulesForPrompt(account.expertRules || [], ["cover", "image_plan", "risk"]);
   const accountContext = {
     id: account.id,
     name: account.name,
@@ -508,7 +508,7 @@ async function buildImagePromptResult(body: any, requestId: string) {
     painPoint: noteTask.painPoint,
     coreView: noteTask.coreView,
     bodyStructure: noteTask.bodyStructure,
-    requiredImages: noteTask.requiredImages,
+    requiredImages: noteTask.requiredMaterials,
     coverCopyDirection: noteTask.coverCopyDirection,
     expectedGoal: noteTask.expectedGoal
   };
@@ -718,6 +718,9 @@ export async function POST(request: Request, _context: { params: { id: string } 
   const body = await request.json().catch(() => ({}));
   if (!body.noteTask || !body.account) {
     return NextResponse.json({ error: "缺少任务上下文" }, { status: 400 });
+  }
+  if (body.noteTask.type === "video_text") {
+    return NextResponse.json({ error: "视频笔记不能生成图片方案，请前往视频方案。" }, { status: 400 });
   }
 
   const task = createAsyncRouteTask(() => buildImagePromptResult(body, requestId));

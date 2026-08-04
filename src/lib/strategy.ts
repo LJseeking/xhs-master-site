@@ -35,6 +35,7 @@ export function buildAccountStrategy(account: Account, template: AccountTypeTemp
 
   const strategyObject = {
     positioning,
+    accountParam: account.accountParam,
     accountType: template.name,
     stage: account.stage,
     persona: account.personaBase,
@@ -86,6 +87,11 @@ ${positioning}
 - 内置类型：${template.name}
 - 账号阶段：${account.stage}
 - 所在城市：${account.city || "未设置"}
+
+## OpenClaw 账号标识
+- 业务账号名称：${account.name}
+- OpenClaw 账号 ID（accountParam）：\`${account.accountParam || "未设置"}\`
+- 所有需要切换小红书账号的 CLI 命令必须使用：\`--account ${account.accountParam || "请先填写账号 ID"}\`。账号名称和本系统数据库编号均不可替代该参数。
 
 ## 人设设定
 ${account.personaBase || "一个有明确经验边界、表达真诚、持续做可复用内容的人设。"}
@@ -149,6 +155,11 @@ ${listBlock(strategyObject.xhsAutoOpGuide)}
 
 ## 账号身份
 ${positioning}
+
+## OpenClaw 账号标识
+- 业务账号名称：${account.name}
+- OpenClaw 账号 ID（accountParam）：\`${account.accountParam || "未设置"}\`
+- 所有需要切换小红书账号的 CLI 命令必须使用：\`--account ${account.accountParam || "请先填写账号 ID"}\`。账号名称和本系统数据库编号均不可替代该参数。
 
 ## 人设设定
 ${account.personaBase || "保持真实、克制、有边界的经验型表达。"}

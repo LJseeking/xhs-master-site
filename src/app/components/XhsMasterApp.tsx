@@ -30,6 +30,7 @@ import {
   ImageOff,
   Trash2,
   Upload,
+  Video,
   Wand2,
   X,
 } from "lucide-react";
@@ -43,20 +44,24 @@ import {
   getUser,
   saveBackendAssets,
   saveBackendNoteTask,
+  saveBackendPostReviewResult,
   saveBackendWeeklyPlan,
+  setBackendExpertRulesEnabled,
   updateBackendAccount,
   buildProxyHeaders,
   type BackendAccountDetail,
   type BackendAsset,
   type BackendNoteTask,
+  type BackendPostReview,
   type BackendWeeklyPlan,
   type LoginResponse
 } from "@/lib/api";
 import { generateStrategyWithBrowserLlm, generateWeeklyTasksWithBrowserLlm } from "@/lib/browserStrategyLlm";
 import { loadBrowserWorkspace, saveBrowserWorkspace } from "@/lib/browserWorkspace";
 import { accountTypeTemplates } from "@/data/accountTypeTemplates";
-import { buildNoteTasks, clampWeeklyFrequency, normalizeWeeklyRatio } from "@/lib/weeklyPlan";
+import { buildNoteTasks, clampWeeklyFrequency, normalizeWeeklyRatio, normalizeWeeklyTaskMedia } from "@/lib/weeklyPlan";
 import { collectRecentWeeklyTopicGroups } from "@/lib/weeklyTopicHistory";
+import { isExpertRuleEnabled } from "@/lib/expertLearning";
 import type React from "react";
 import clsx from "clsx";
 
@@ -109,6 +114,7 @@ type ReferenceResearch = {
   contentFeatures: string;
   personaInsights: string;
   strategyInsights: string;
+  writingStyleInsights: string;
   status: string;
 };
 
@@ -139,10 +145,13 @@ type InteractionPlan = {
 type PostReview = {
   id: number;
   noteTaskId: number | null;
-  inputJson: string;
-  prompt: string;
+  input: BackendPostReview["input"];
+  summary: string;
+  evidenceAssessment: string;
+  aiModel: string;
   status: string;
   createdAt: string;
+  updatedAt?: string;
 };
 
 type ExpertRule = {
@@ -151,9 +160,16 @@ type ExpertRule = {
   module: string;
   rule: string;
   source: string;
-  confidence: number;
   status: string;
+  enabled?: boolean;
+  positiveExample?: string;
+  negativeExample?: string;
+  reason?: string;
+  applicableWhen?: string;
+  notApplicableWhen?: string;
+  nextTest?: string;
   createdAt: string;
+  updatedAt?: string;
 };
 
 type IndustryKnowledgeResearch = {
@@ -206,6 +222,7 @@ type WeeklyPlan = {
 
 type NoteTask = {
   id: number;
+  type: "image_text" | "video_text";
   publishAt: string;
   contentType: string;
   contentGoal: string;
@@ -214,14 +231,14 @@ type NoteTask = {
   painPoint: string;
   coreView: string;
   bodyStructure: string;
-  requiredImages: string;
+  requiredMaterials: string;
   recommendedAssets: string;
   coverCopyDirection: string;
   commentHook: string;
   expectedGoal: string;
   status: string;
   bodyDraft?: string;
-  imagePlan?: string;
+  plan?: string;
 };
 
 type PromptResult = {
@@ -236,6 +253,12 @@ type ImagePromptResult = {
   imagePrompt: { content: string; title: string; path: string };
   referenceStyle: string;
   commands: Array<{ category: string; command: string; description: string; safetyNote: string }>;
+};
+
+type VideoPromptResult = {
+  openclawTask: { content: string; title: string };
+  videoPrompt: { content: string; title: string };
+  ai?: { used: boolean; calls: number };
 };
 
 type BatchImagePostsResult = {
@@ -272,6 +295,7 @@ const mainTabs = [
   ["accounts", "客户账号", ShieldCheck],
   ["weekly", "本周内容", CalendarDays],
   ["images", "图片方案", ImageIcon],
+  ["videos", "视频方案", Video],
   ["prompts", "笔记草稿", Wand2],
   ["assets", "素材库", Library],
   ["interactions", "发布后互动", MessageCircle],
@@ -425,10 +449,26 @@ function isRemoteImageAsset(asset: Asset) {
     || /\.(?:avif|gif|jpe?g|png|webp)(?:$|\?)/i.test(asset.fileUrl);
 }
 
-function inferQuickImageCount(requiredImages: string) {
-  const matched = requiredImages.match(/(\d+)\s*张/);
+function isRemoteVideoAsset(asset: Asset) {
+  if (!asset.fileUrl) return false;
+  const type = (asset.fileType || "").toLowerCase();
+  return type === "video" || type.startsWith("video/") || /\.(?:mp4|mov|m4v|webm)(?:$|\?)/i.test(asset.fileUrl);
+}
+
+function inferQuickImageCount(requiredMaterials: string) {
+  const matched = requiredMaterials.match(/(\d+)\s*张/);
   const parsed = matched ? Number.parseInt(matched[1], 10) : 5;
   return Math.max(1, Math.min(Number.isFinite(parsed) ? parsed : 5, 9));
+}
+
+function normalizeReviewPublishedAt(value: string) {
+  const normalized = value.trim();
+  if (!normalized) return "";
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(normalized)) return `${normalized}:00`;
+  if (/^\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2}:\d{2}|T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)$/.test(normalized)) {
+    return normalized;
+  }
+  throw new Error("发布时间格式不正确，请使用 YYYY-MM-DD、YYYY-MM-DD HH:mm 或完整 RFC3339 时间。");
 }
 
 function RemoteAssetPicker(props: {
@@ -1247,7 +1287,7 @@ function buildLocalAccount(
 function mapBackendAccountToUiAccount(account: BackendAccountDetail): Account {
   const assets = (account.assets || []).map((asset) => mapBackendAssetToUiAsset(asset));
   const weeklyPlans = (account.weeklyPlans || []).map((plan) => ({
-    id: plan.id,
+    id: plan.id || Date.now(),
     weekStart: plan.weekStart,
     theme: plan.theme,
     goal: plan.goal,
@@ -1259,8 +1299,8 @@ function mapBackendAccountToUiAccount(account: BackendAccountDetail): Account {
     availableAssets: plan.availableAssets,
     taboos: plan.taboos,
     status: plan.status || "draft",
-    noteTasks: (plan.noteTasks || []).map((task) => ({
-      id: task.id,
+    noteTasks: normalizeWeeklyTaskMedia((plan.noteTasks || []).map((task) => ({
+      id: task.id || Date.now(),
       publishAt: task.publishAt || "",
       contentType: task.contentType || "",
       contentGoal: task.contentGoal || "",
@@ -1269,15 +1309,16 @@ function mapBackendAccountToUiAccount(account: BackendAccountDetail): Account {
       painPoint: task.painPoint || "",
       coreView: task.coreView || "",
       bodyStructure: task.bodyStructure || "",
-      requiredImages: task.requiredImages || "",
+      type: task.type === "video_text" ? "video_text" as const : "image_text" as const,
+      requiredMaterials: task.requiredMaterials || "",
       recommendedAssets: task.recommendedAssets || "",
       coverCopyDirection: task.coverCopyDirection || "",
       commentHook: task.commentHook || "",
       expectedGoal: task.expectedGoal || "",
       status: task.status || "待生成",
       bodyDraft: task.bodyDraft || "",
-      imagePlan: task.imagePlan || ""
-    }))
+      plan: task.plan || ""
+    })), (plan.noteTasks || []).filter((task) => task.type === "video_text").length)
   }));
   return {
     id: account.id,
@@ -1310,8 +1351,8 @@ function mapBackendAccountToUiAccount(account: BackendAccountDetail): Account {
     referenceResearches: [],
     imageStyleStudies: [],
     interactionPlans: [],
-    postReviews: [],
-    expertRules: [],
+    postReviews: (account.postReviews || []).map((review) => ({ ...review })),
+    expertRules: (account.expertRules || []).map((rule) => ({ ...rule })),
     industryKnowledgeResearches: [],
     assets,
     weeklyPlans
@@ -1338,6 +1379,7 @@ function toBackendAsset(asset: Asset): BackendAsset {
   return {
     id: asset.id,
     filePath: asset.filePath,
+    fileUrl: asset.fileUrl || "",
     fileType: asset.fileType,
     sourceType: asset.sourceType,
     location: asset.location || "",
@@ -1380,6 +1422,7 @@ function mapBackendAssetToUiAsset(asset: BackendAsset, fallback?: Partial<Asset>
 function toBackendNoteTask(task: NoteTask): BackendNoteTask {
   return {
     id: task.id,
+    type: task.type,
     publishAt: task.publishAt,
     contentType: task.contentType,
     contentGoal: task.contentGoal,
@@ -1388,20 +1431,19 @@ function toBackendNoteTask(task: NoteTask): BackendNoteTask {
     painPoint: task.painPoint,
     coreView: task.coreView,
     bodyStructure: task.bodyStructure,
-    requiredImages: task.requiredImages,
+    requiredMaterials: task.requiredMaterials,
     recommendedAssets: task.recommendedAssets,
     coverCopyDirection: task.coverCopyDirection,
     commentHook: task.commentHook,
     expectedGoal: task.expectedGoal,
     status: task.status,
     bodyDraft: task.bodyDraft || "",
-    imagePlan: task.imagePlan || ""
+    plan: task.plan || ""
   };
 }
 
 function toBackendWeeklyPlan(plan: WeeklyPlan): BackendWeeklyPlan {
   return {
-    id: plan.id,
     weekStart: plan.weekStart,
     theme: plan.theme,
     goal: plan.goal,
@@ -1413,7 +1455,11 @@ function toBackendWeeklyPlan(plan: WeeklyPlan): BackendWeeklyPlan {
     availableAssets: plan.availableAssets,
     taboos: plan.taboos,
     status: plan.status || "draft",
-    noteTasks: plan.noteTasks.map(toBackendNoteTask)
+    noteTasks: plan.noteTasks.map((task) => {
+      const backendTask = toBackendNoteTask(task);
+      delete backendTask.id;
+      return backendTask;
+    })
   };
 }
 
@@ -1440,8 +1486,8 @@ function mergeBackendAccountWithLocalState(account: Account, local?: Account): A
     referenceResearches: local.referenceResearches?.length ? local.referenceResearches : account.referenceResearches,
     imageStyleStudies: local.imageStyleStudies?.length ? local.imageStyleStudies : account.imageStyleStudies,
     interactionPlans: local.interactionPlans?.length ? local.interactionPlans : account.interactionPlans,
-    postReviews: local.postReviews?.length ? local.postReviews : account.postReviews,
-    expertRules: local.expertRules?.length ? local.expertRules : account.expertRules,
+    postReviews: account.postReviews,
+    expertRules: account.expertRules,
     industryKnowledgeResearches: local.industryKnowledgeResearches?.length
       ? local.industryKnowledgeResearches
       : account.industryKnowledgeResearches,
@@ -1492,6 +1538,7 @@ export function XhsMasterApp() {
   const [currentUser, setCurrentUser] = useState<LoginResponse | null>(null);
   const [promptResults, setPromptResults] = useState<Record<number, PromptResult>>({});
   const [imagePromptResults, setImagePromptResults] = useState<Record<number, ImagePromptResult>>({});
+  const [videoPromptResults, setVideoPromptResults] = useState<Record<number, VideoPromptResult>>({});
   const [batchImagePostResults, setBatchImagePostResults] = useState<Record<number, BatchImagePostsResult>>({});
   const [selectedNoteId, setSelectedNoteId] = useState<number | null>(null);
   const [health, setHealth] = useState<any>(null);
@@ -1500,7 +1547,7 @@ export function XhsMasterApp() {
     research?: ReferenceResearch;
     commands?: Array<{ category: string; command: string; description: string; safetyNote: string }>;
     researchPrompt?: string;
-    summary?: { summaryMarkdown: string; contentFeatures: string; personaInsights: string; strategyInsights: string };
+    summary?: { summaryMarkdown: string; contentFeatures: string; personaInsights: string; strategyInsights: string; writingStyleInsights: string };
   }>({});
   const [imageStyleDraft, setImageStyleDraft] = useState<{
     study?: ImageStyleStudy;
@@ -1515,7 +1562,6 @@ export function XhsMasterApp() {
     commentPrompt?: string;
     summary?: { targetUsersMarkdown: string; commentDraftsMarkdown: string };
   }>({});
-  const [postReviewPrompt, setPostReviewPrompt] = useState("");
   const [industryLearningDraft, setIndustryLearningDraft] = useState<{
     research?: IndustryKnowledgeResearch;
     commands?: Array<{ category: string; command: string; description: string; safetyNote: string }>;
@@ -1543,11 +1589,11 @@ export function XhsMasterApp() {
         setTemplates((snapshot.templates as Template[])?.length ? (snapshot.templates as Template[]) : localTemplates);
         setPromptResults((snapshot.promptResults as Record<number, PromptResult>) || {});
         setImagePromptResults((snapshot.imagePromptResults as Record<number, ImagePromptResult>) || {});
+        setVideoPromptResults((snapshot.videoPromptResults as Record<number, VideoPromptResult>) || {});
         setBatchImagePostResults((snapshot.batchImagePostResults as Record<number, BatchImagePostsResult>) || {});
         setReferenceDraft((snapshot.referenceDraft as typeof referenceDraft) || {});
         setImageStyleDraft((snapshot.imageStyleDraft as typeof imageStyleDraft) || {});
         setInteractionDraft((snapshot.interactionDraft as typeof interactionDraft) || {});
-        setPostReviewPrompt(snapshot.postReviewPrompt || "");
         setIndustryLearningDraft((snapshot.industryLearningDraft as typeof industryLearningDraft) || {});
         return snapshot;
       })
@@ -1585,11 +1631,11 @@ export function XhsMasterApp() {
       selectedId,
       promptResults,
       imagePromptResults,
+      videoPromptResults,
       batchImagePostResults,
       referenceDraft,
       imageStyleDraft,
       interactionDraft,
-      postReviewPrompt,
       industryLearningDraft
     }).catch(() => {
       // 工作区缓存写失败时不打断当前操作，仅在后续用户动作中继续使用内存态。
@@ -1601,11 +1647,11 @@ export function XhsMasterApp() {
     selectedId,
     promptResults,
     imagePromptResults,
+    videoPromptResults,
     batchImagePostResults,
     referenceDraft,
     imageStyleDraft,
     interactionDraft,
-    postReviewPrompt,
     industryLearningDraft
   ]);
 
@@ -1745,7 +1791,6 @@ export function XhsMasterApp() {
       setReferenceDraft({});
       setImageStyleDraft({});
       setInteractionDraft({});
-      setPostReviewPrompt("");
       setIndustryLearningDraft({});
       setActiveTab(nextAccountId ? "dashboard" : "accounts");
       showToast("账号已删除。");
@@ -1864,6 +1909,7 @@ export function XhsMasterApp() {
     const form = new FormData(event.currentTarget);
     const payload = Object.fromEntries(form.entries()) as Record<string, FormDataEntryValue>;
     const frequency = clampWeeklyFrequency(payload.frequency);
+    const videoCount = Math.max(0, Math.min(Number.parseInt(String(payload.videoCount || "0"), 10) || 0, frequency));
     const ratio = normalizeWeeklyRatio(String(payload.ratio || ""), frequency);
     payload.frequency = String(frequency);
     payload.ratio = ratio;
@@ -1899,6 +1945,7 @@ export function XhsMasterApp() {
         theme: plan.theme,
         goal: plan.goal,
         frequency: plan.frequency,
+        videoCount,
         ratio: plan.ratio,
         testHypothesis: plan.testHypothesis,
         commercializationMove: plan.commercializationMove,
@@ -1911,6 +1958,7 @@ export function XhsMasterApp() {
         : collectRecentWeeklyTopicGroups(selected.weeklyPlans || [], plan.weekStart);
       const weeklyInput = {
         ...fallbackWeeklyInput,
+        videoCount,
         weeklyFocus,
         recentTopicGroups
       };
@@ -1932,7 +1980,7 @@ export function XhsMasterApp() {
       const nextPlan = {
         ...plan,
         status: "draft",
-        noteTasks: llmResult.data.map((task, index) => ({ ...task, id: Date.now() + index, bodyDraft: "", imagePlan: "" }))
+        noteTasks: llmResult.data.map((task, index) => ({ ...task, id: Date.now() + index, bodyDraft: "", plan: "" }))
       };
       const savedPlan = await saveBackendWeeklyPlan(selected.id, toBackendWeeklyPlan(nextPlan));
       const mappedSavedPlan = mapBackendAccountToUiAccount({
@@ -1954,6 +2002,38 @@ export function XhsMasterApp() {
       showToast(llmResult.usedLlm ? "本周内容计划已生成。" : llmResult.error || "已使用默认模板生成本周内容计划。");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "生成计划失败。");
+    } finally {
+      setLoading(false);
+      setLoadingAction(null);
+    }
+  }
+
+  async function changeNoteTaskType(task: NoteTask, type: NoteTask["type"]) {
+    if (!selected || !latestPlan || task.type === type) return;
+    if (task.plan?.trim() && !window.confirm("切换帖子类型会清空当前已生成的图片或视频方案，是否继续？")) return;
+    setLoading(true);
+    setLoadingAction(`changeTaskType-${task.id}`);
+    try {
+      const normalizedTask = normalizeWeeklyTaskMedia([{ ...task, type }], type === "video_text" ? 1 : 0)[0];
+      const saved = await saveBackendNoteTask(selected.id, latestPlan.id, toBackendNoteTask({
+        ...normalizedTask,
+        requiredMaterials: type === "video_text" ? "视频笔记：可直接使用 1 个视频，或选择 2-6 张素材库图片生成视频。" : "图文笔记：按选题准备真实图片或 AI 辅助图。",
+        plan: "",
+        status: "待生成方案"
+      }));
+      updateSelectedAccount((account) => ({
+        ...account,
+        weeklyPlans: account.weeklyPlans.map((plan) => plan.id !== latestPlan.id ? plan : {
+          ...plan,
+          noteTasks: plan.noteTasks.map((item) => item.id === task.id ? { ...item, ...saved } : item)
+        })
+      }));
+      setImagePromptResults((current) => { const next = { ...current }; delete next[task.id]; return next; });
+      setVideoPromptResults((current) => { const next = { ...current }; delete next[task.id]; return next; });
+      setPromptResults((current) => { const next = { ...current }; delete next[task.id]; return next; });
+      showToast(`已切换为${type === "video_text" ? "视频" : "图文"}笔记。`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "切换帖子类型失败。");
     } finally {
       setLoading(false);
       setLoadingAction(null);
@@ -2003,7 +2083,7 @@ export function XhsMasterApp() {
       const resolved = data.async && data.uuid
         ? await waitForAsyncRouteResult<{
           research: ReferenceResearch;
-          summary: { summaryMarkdown: string; contentFeatures: string; personaInsights: string; strategyInsights: string };
+          summary: { summaryMarkdown: string; contentFeatures: string; personaInsights: string; strategyInsights: string; writingStyleInsights: string };
           account?: { referenceAccounts: string; strategy?: Account["strategy"]; profile?: Account["profile"] };
         }>(`/api/accounts/${selected.id}/reference-research`, data.uuid)
       : data;
@@ -2176,18 +2256,26 @@ export function XhsMasterApp() {
 
   async function generatePrompt(task: NoteTask, controls: GenerationControls = {}): Promise<PromptResult | null> {
     if (!selected || !latestPlan) return null;
-    if (!task.imagePlan?.trim()) {
-      showToast("请先为当前笔记生成单篇图片方案，再生成图文草稿箱指令。");
+    if (!task.plan?.trim()) {
+      showToast(task.type === "video_text" ? "请先生成视频方案，再生成视频草稿箱指令。" : "请先生成单篇图片方案，再生成图文草稿箱指令。");
       return null;
     }
     const manageLoading = controls.manageLoading ?? true;
     if (manageLoading) setLoading(true);
     setLoadingAction(controls.loadingAction || "generatePrompt");
     try {
+      let accountForPrompt = selected;
+      try {
+        const latestAccount = mapBackendAccountToUiAccount(await fetchBackendAccountDetail(selected.id));
+        accountForPrompt = mergeBackendAccountWithLocalState(latestAccount, selected);
+        updateSelectedAccount(() => accountForPrompt);
+      } catch {
+        // 账号详情刷新失败时，继续使用当前客户端状态生成任务。
+      }
       const res = await fetch(`/api/note-tasks/${task.id}/prompt`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ account: selected, noteTask: task, weeklyPlan: latestPlan })
+        body: JSON.stringify({ account: accountForPrompt, noteTask: task, weeklyPlan: latestPlan })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "生成图文草稿箱任务失败。");
@@ -2242,10 +2330,11 @@ export function XhsMasterApp() {
         latestPlan.id,
         toBackendNoteTask({
           ...task,
-          imagePlan: resolved.imagePrompt?.content || task.imagePlan || "",
+          plan: resolved.imagePrompt?.content || task.plan || "",
           status: task.status || "已生成图片方案"
         })
       );
+      const savedUiTask: NoteTask = { ...task, ...savedTask, id: savedTask.id || task.id };
       updateSelectedAccount((account) => ({
         ...account,
         weeklyPlans: account.weeklyPlans.map((plan) =>
@@ -2257,7 +2346,7 @@ export function XhsMasterApp() {
                   item.id === task.id
                     ? {
                         ...item,
-                        ...savedTask
+                        ...savedUiTask
                       }
                     : item
                 )
@@ -2265,7 +2354,7 @@ export function XhsMasterApp() {
         )
       }));
       if (controls.showSuccessToast ?? true) showToast("图片方案和执行命令已生成。");
-      return { result: resolved, savedTask };
+      return { result: resolved, savedTask: savedUiTask };
     } catch (error) {
       showToast(error instanceof Error ? error.message : "生成图片方案失败。");
       return null;
@@ -2274,6 +2363,86 @@ export function XhsMasterApp() {
         setLoading(false);
         setLoadingAction(null);
       }
+    }
+  }
+
+  async function generateVideoPrompt(task: NoteTask, mode: "direct_video" | "image_to_video", assets: Asset[]) {
+    if (!selected || !latestPlan || task.type !== "video_text") return;
+    setLoading(true);
+    setLoadingAction("generateVideoPrompt");
+    try {
+      const res = await fetch(`/api/note-tasks/${task.id}/video-prompt`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account: selected, noteTask: task, mode, assets })
+      });
+      const data = await readApiJsonResponse(res, "创建视频方案任务失败");
+      if (!res.ok) throw new Error(data.error || "生成视频方案失败。");
+      const resolved = data.async && data.uuid
+        ? await waitForAsyncRouteResult<VideoPromptResult>(`/api/note-tasks/${task.id}/video-prompt`, data.uuid)
+        : data as VideoPromptResult;
+      setVideoPromptResults((current) => ({ ...current, [task.id]: resolved }));
+      const savedTask = await saveBackendNoteTask(selected.id, latestPlan.id, toBackendNoteTask({
+        ...task,
+        plan: resolved.videoPrompt.content,
+        status: "已生成视频方案"
+      }));
+      updateSelectedAccount((account) => ({
+        ...account,
+        weeklyPlans: account.weeklyPlans.map((plan) => plan.id !== latestPlan.id ? plan : {
+          ...plan,
+          noteTasks: plan.noteTasks.map((item) => item.id === task.id ? { ...item, ...savedTask } : item)
+        })
+      }));
+      showToast(mode === "direct_video" ? "直接视频任务已生成。" : "图片转视频方案已生成。");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "生成视频方案失败。");
+    } finally {
+      setLoading(false);
+      setLoadingAction(null);
+    }
+  }
+
+  async function uploadVideoAsset(file: File): Promise<Asset | null> {
+    if (!selected) return null;
+    const token = getToken();
+    const user = getUser();
+    if (!token || !user) {
+      showToast("登录状态失效，请重新登录后再上传。");
+      return null;
+    }
+    setLoading(true);
+    setLoadingAction("uploadVideoAsset");
+    try {
+      const form = new FormData();
+      form.set("accountId", String(selected.id));
+      form.set("sourceType", "真实素材");
+      form.append("files", file);
+      const res = await fetch("/api/assets/upload", {
+        method: "POST",
+        headers: {
+          "Xhs-Sign": token,
+          "Xhs-Person": String(user.uid),
+          "Xhs-Time": Math.floor(Date.now() / 1000).toString(),
+          "Xhs-Request-Id": `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+          "Xhs-Test": "1"
+        },
+        body: form
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.assets?.[0]) throw new Error(data.error || "上传视频失败。");
+      const uploaded = data.assets[0] as Asset;
+      const saved = await saveBackendAssets(selected.id, [toBackendAsset(uploaded), ...selected.assets.map(toBackendAsset)]);
+      const nextAssets = saved.map((asset) => mapBackendAssetToUiAsset(asset));
+      updateSelectedAccount((account) => ({ ...account, assets: nextAssets }));
+      showToast("视频已上传并登记到素材库。");
+      return nextAssets.find((asset) => asset.fileUrl === uploaded.fileUrl || asset.filePath === uploaded.filePath) || uploaded;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "上传视频失败。");
+      return null;
+    } finally {
+      setLoading(false);
+      setLoadingAction(null);
     }
   }
 
@@ -2292,7 +2461,13 @@ export function XhsMasterApp() {
     try {
       let latestTask = task;
       if (shouldGenerateImage) {
-        const imageCount = inferQuickImageCount(task.requiredImages || "");
+        if (task.type === "video_text") {
+          setSelectedNoteId(task.id);
+          setActiveTab("videos");
+          showToast("视频任务需要先选择视频来源，请在视频方案中继续。");
+          return;
+        }
+        const imageCount = inferQuickImageCount(task.requiredMaterials || "");
         const candidateAssets = (selected.assets || []).filter(
           (asset) => isRemoteImageAsset(asset) && /^https?:\/\//i.test(asset.fileUrl || "")
         );
@@ -2371,7 +2546,7 @@ export function XhsMasterApp() {
         ...selectedNote,
         status: "已保存草稿",
         bodyDraft: JSON.stringify(payload),
-        imagePlan: imagePromptResults[selectedNote.id]?.imagePrompt?.content || selectedNote.imagePlan || ""
+        plan: imagePromptResults[selectedNote.id]?.imagePrompt?.content || selectedNote.plan || ""
       };
       const savedTask = await saveBackendNoteTask(selected.id, latestPlan.id, toBackendNoteTask(nextTask));
       updateSelectedAccount((account) => ({
@@ -2404,40 +2579,98 @@ export function XhsMasterApp() {
   async function generatePostReview(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selected) return;
-    const form = new FormData(event.currentTarget);
-    setLoading(true);
-    setLoadingAction("generatePostReview");
-    try {
+      const form = new FormData(event.currentTarget);
+      setLoading(true);
+      setLoadingAction("generatePostReview");
+      try {
+        const plannedTitle = selectedNote?.topicTitle || "";
+        const input = {
+          postTitle: String(form.get("postTitle") || "").trim() || plannedTitle,
+        postUrl: String(form.get("postUrl") || ""),
+        publishedAt: normalizeReviewPublishedAt(String(form.get("publishedAt") || "")),
+        actualContent: String(form.get("actualContent") || ""),
+        metrics: String(form.get("metrics") || ""),
+        comments: String(form.get("comments") || ""),
+        expertFeedback: String(form.get("expertFeedback") || ""),
+        editComparison: String(form.get("editComparison") || ""),
+        subjective: String(form.get("subjective") || ""),
+        distillGoal: String(form.get("distillGoal") || "")
+      };
+      if (![input.actualContent, input.metrics, input.comments, input.expertFeedback, input.editComparison, input.subjective].some((value) => value.trim())) {
+        throw new Error("请至少填写实际发布内容、表现数据、用户反馈、专家点评、修改对比或主观观察中的一项。");
+      }
+      const noteTaskId = Number(form.get("noteTaskId") || selectedNote?.id || 0) || undefined;
       const res = await fetch(`/api/accounts/${selected.id}/post-reviews`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           account: selected,
           noteTask: selectedNote || null,
-          noteTaskId: form.get("noteTaskId") || selectedNote?.id || null,
-          postTitle: form.get("postTitle"),
-          postUrl: form.get("postUrl"),
-          publishedAt: form.get("publishedAt"),
-          actualContent: form.get("actualContent"),
-          metrics: form.get("metrics"),
-          comments: form.get("comments"),
-          expertFeedback: form.get("expertFeedback"),
-          editComparison: form.get("editComparison"),
-          subjective: form.get("subjective"),
-          distillGoal: form.get("distillGoal")
+          noteTaskId,
+          ...input
         })
       });
-      const data = await res.json();
+      const data = await readApiJsonResponse(res, "执行专家复盘失败");
       if (!res.ok) throw new Error(data.error || "生成单帖复盘失败。");
-      setPostReviewPrompt(data.prompt || "");
+      const result = data.async && data.uuid
+        ? await waitForAsyncRouteResult<{
+            summary: string;
+            evidenceAssessment: string;
+            aiModel: string;
+            rules: Array<{
+              module: string;
+              rule: string;
+              positiveExample: string;
+              negativeExample: string;
+              reason: string;
+              source: string;
+              applicableWhen: string;
+              notApplicableWhen: string;
+              nextTest: string;
+            }>;
+          }>(`/api/accounts/${selected.id}/post-reviews`, String(data.uuid))
+        : data;
+      const saved = await saveBackendPostReviewResult({
+        accountId: selected.id,
+        ...(noteTaskId ? { noteTaskId } : {}),
+        input,
+        summary: result.summary,
+        evidenceAssessment: result.evidenceAssessment,
+        aiModel: result.aiModel,
+        rules: (result.rules || []).slice(0, 5)
+      });
+      const savedRules = saved.rules || [];
       updateSelectedAccount((account) => ({
         ...account,
-        postReviews: [data.review, ...(account.postReviews || []).filter((item) => item.id !== data.review.id)]
+        postReviews: [saved.postReview, ...(account.postReviews || []).filter((item) => item.id !== saved.postReview.id)],
+        // saveResult 按接口约定返回当前账号的完整规则库，不能与旧的本地状态再合并。
+        expertRules: savedRules
       }));
-      downloadText(`post-review-${selected.name}.md`, data.prompt || "");
-      showToast("单帖专家复盘 Prompt 已生成并下载。");
+      showToast(savedRules.length > 15
+        ? `专家复盘已保存，但服务端返回 ${savedRules.length} 条规则，超过同账号 15 条上限；请检查服务端 saveResult 的限额与合并逻辑。`
+        : `专家复盘已完成，本次最多提交 5 条候选规则；当前规则库共 ${savedRules.length} 条。`);
     } catch (error) {
       showToast(error instanceof Error ? error.message : "生成单帖复盘失败。");
+    } finally {
+      setLoading(false);
+      setLoadingAction(null);
+    }
+  }
+
+  async function saveExpertRuleSelection(enabledRuleIds: number[]) {
+    if (!selected) return;
+    if (enabledRuleIds.length > 5) {
+      showToast("每个账号最多启用 5 条规则。");
+      return;
+    }
+    setLoading(true);
+    setLoadingAction("saveExpertRuleSelection");
+    try {
+      const rules = await setBackendExpertRulesEnabled(selected.id, enabledRuleIds);
+      updateSelectedAccount((account) => ({ ...account, expertRules: rules }));
+      showToast(enabledRuleIds.length ? `已启用 ${enabledRuleIds.length} 条规则。` : "已关闭全部规则。");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "保存规则选择失败。");
     } finally {
       setLoading(false);
       setLoadingAction(null);
@@ -2514,37 +2747,6 @@ export function XhsMasterApp() {
       showToast(error instanceof Error ? error.message : "保存行业学习失败。");
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function saveExpertRules(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selected) return;
-    const form = new FormData(event.currentTarget);
-    setLoading(true);
-    setLoadingAction("saveExpertRules");
-    try {
-      const res = await fetch(`/api/accounts/${selected.id}/expert-rules`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          account: selected,
-          rulesJson: form.get("rulesJson"),
-          source: form.get("source") || "manual"
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "保存规则失败。");
-      updateSelectedAccount((account) => ({
-        ...account,
-        expertRules: [...(data.rules || []), ...(account.expertRules || []).filter((item) => !(data.rules || []).some((rule: { id: number }) => rule.id === item.id))]
-      }));
-      showToast(`已保存 ${data.rules?.length || 0} 条候选规则。`);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "保存规则失败。");
-    } finally {
-      setLoading(false);
-      setLoadingAction(null);
     }
   }
 
@@ -2767,7 +2969,7 @@ export function XhsMasterApp() {
               loadingAction={loadingAction}
             />
           )}
-          {activeTab === "weekly" && <WeeklyPanel selected={selected} generateWeeklyPlan={generateWeeklyPlan} loading={loading} loadingAction={loadingAction} />}
+          {activeTab === "weekly" && <WeeklyPanel selected={selected} generateWeeklyPlan={generateWeeklyPlan} changeNoteTaskType={changeNoteTaskType} loading={loading} loadingAction={loadingAction} />}
           {activeTab === "images" && (
             <ImagesPanel
               selected={selected}
@@ -2790,6 +2992,20 @@ export function XhsMasterApp() {
               generateImagePrompt={generateImagePrompt}
               batchImagePostResult={selected ? batchImagePostResults[selected.id] : null}
               generateBatchImagePosts={generateBatchImagePosts}
+              copy={copy}
+              loading={loading}
+              loadingAction={loadingAction}
+            />
+          )}
+          {activeTab === "videos" && (
+            <VideosPanel
+              selected={selected}
+              plan={latestPlan}
+              selectedNoteId={selectedNote?.id ?? null}
+              setSelectedNoteId={setSelectedNoteId}
+              results={videoPromptResults}
+              generateVideoPrompt={generateVideoPrompt}
+              uploadVideoAsset={uploadVideoAsset}
               copy={copy}
               loading={loading}
               loadingAction={loadingAction}
@@ -2829,9 +3045,7 @@ export function XhsMasterApp() {
               selectedNoteId={selectedNote?.id ?? null}
               setSelectedNoteId={setSelectedNoteId}
               generatePostReview={generatePostReview}
-              saveExpertRules={saveExpertRules}
-              postReviewPrompt={postReviewPrompt}
-              copy={copy}
+              saveExpertRuleSelection={saveExpertRuleSelection}
               loading={loading}
               loadingAction={loadingAction}
             />
@@ -2842,7 +3056,6 @@ export function XhsMasterApp() {
               draft={industryLearningDraft}
               prepareIndustryLearning={prepareIndustryLearning}
               saveIndustryLearning={saveIndustryLearning}
-              saveExpertRules={saveExpertRules}
               copy={copy}
               loading={loading}
               loadingAction={loadingAction}
@@ -2886,6 +3099,7 @@ function Dashboard({
     ["账号策划", selected?.strategy ? "已可用" : "待创建", "strategy"],
     ["本周内容", `${selected?.weeklyPlans?.[0]?.noteTasks?.length ?? 0} 篇`, "weekly"],
     ["图片方案", selected?.weeklyPlans?.[0]?.noteTasks?.length ? "可生成" : "待计划", "images"],
+    ["视频方案", selected?.weeklyPlans?.[0]?.noteTasks?.some((task) => task.type === "video_text") ? "可生成" : "待视频计划", "videos"],
     ["笔记草稿", selected?.weeklyPlans?.[0]?.noteTasks?.length ? "可生成" : "待计划", "prompts"],
     ["素材库", `${selected?.assets?.length ?? 0} 个`, "assets"],
     ["发布后互动", selected?.interactionPlans?.[0]?.status || "可选", "interactions"]
@@ -2897,12 +3111,15 @@ function Dashboard({
   const currentNote = plan?.noteTasks.find((task) => task.id === selectedNoteId) ?? plan?.noteTasks?.[0];
   const currentImageResult = currentNote ? imagePromptResults[currentNote.id] : null;
   const currentPromptResult = currentNote ? promptResults[currentNote.id] : null;
-  const imageTaskContent = currentImageResult?.openclawTask?.content || currentImageResult?.imagePrompt?.content || "";
+  const isVideoTask = currentNote?.type === "video_text";
+  const imageTaskContent = currentImageResult?.openclawTask?.content || currentImageResult?.imagePrompt?.content || currentNote?.plan || "";
   const draftTaskContent = currentPromptResult?.openclawTask?.content || currentPromptResult?.prompt?.content || "";
-  const hasImagePlan = Boolean(currentNote?.imagePlan?.trim() || imageTaskContent);
+  const hasImagePlan = Boolean(currentNote?.plan?.trim() || imageTaskContent);
   const hasDraftTask = Boolean(draftTaskContent);
   const isQuickGenerating = loadingAction === "dashboardImagePrompt" || loadingAction === "dashboardDraftPrompt";
-  const generateButtonText = hasImagePlan && hasDraftTask
+  const generateButtonText = isVideoTask
+    ? "前往视频方案"
+    : hasImagePlan && hasDraftTask
     ? "重新生成图片方案 + 文字方案"
     : hasImagePlan
       ? "生成文字方案"
@@ -2913,7 +3130,7 @@ function Dashboard({
 
   function openImageSetup() {
     if (currentNote) setSelectedNoteId(currentNote.id);
-    setActiveTab("images");
+    setActiveTab(isVideoTask ? "videos" : "images");
   }
 
   return (
@@ -2939,7 +3156,7 @@ function Dashboard({
           </button>
         </div>
       </div>
-      <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-7">
         {cards.map(([label, value, tab]) => (
           <button key={label} type="button" onClick={() => setActiveTab(tab)} className="panel text-left">
             <div className="text-sm text-ink/55">{label}</div>
@@ -3007,7 +3224,7 @@ function Dashboard({
                       || imagePromptResults[task.id]?.imagePrompt?.content;
                     const taskDraftContent = promptResults[task.id]?.openclawTask?.content
                       || promptResults[task.id]?.prompt?.content;
-                    const taskHasImage = Boolean(task.imagePlan?.trim() || taskImageContent);
+                    const taskHasImage = Boolean(task.plan?.trim() || taskImageContent);
                     const taskHasDraft = Boolean(taskDraftContent);
                     const status = taskHasImage && taskHasDraft ? "已就绪" : taskHasImage ? "待生成文字" : "待生成";
                     return (
@@ -3064,8 +3281,8 @@ function Dashboard({
                       <span>{currentNote.contentGoal || currentNote.expectedGoal}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <ImageIcon size={16} className={hasImagePlan ? "text-teal" : "text-ink/35"} />
-                      <span>图片方案：{hasImagePlan ? "已生成" : "待生成"}</span>
+                      {isVideoTask ? <Video size={16} className={hasImagePlan ? "text-teal" : "text-ink/35"} /> : <ImageIcon size={16} className={hasImagePlan ? "text-teal" : "text-ink/35"} />}
+                      <span>{isVideoTask ? "视频" : "图片"}方案：{hasImagePlan ? "已生成" : "待生成"}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <NotebookPen size={16} className={hasDraftTask ? "text-teal" : "text-ink/35"} />
@@ -3089,7 +3306,7 @@ function Dashboard({
                   />
                 </button>
                 <p className="mt-2 text-xs leading-5 text-ink/55">
-                  快捷生成默认使用 AI 自动选图并去除水印；图片完成后才会继续生成文字方案。
+                  {isVideoTask ? "视频任务需要先选择直接视频或图片转视频模式，点击后将前往视频方案。" : "快捷生成默认使用 AI 自动选图并去除水印；图片完成后才会继续生成文字方案。"}
                 </p>
 
                 <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -3099,7 +3316,7 @@ function Dashboard({
                     disabled={!imageTaskContent || loading}
                     className="secondary-button w-full justify-center"
                   >
-                    <ImageIcon size={17} /> 复制图片方案
+                    {isVideoTask ? <Video size={17} /> : <ImageIcon size={17} />} 复制{isVideoTask ? "视频" : "图片"}方案
                   </button>
                   <button
                     type="button"
@@ -3112,12 +3329,12 @@ function Dashboard({
                 </div>
 
                 <button type="button" onClick={openImageSetup} className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-teal hover:underline">
-                  <ExternalLink size={16} /> 调整图片来源、数量或精修要求
+                  <ExternalLink size={16} /> 调整{isVideoTask ? "视频来源或图片顺序" : "图片来源、数量或精修要求"}
                 </button>
 
                 {hasImagePlan && hasDraftTask ? (
                   <div className="mt-5 rounded border border-teal/20 bg-teal/5 p-3 text-sm leading-6 text-teal">
-                    两项任务已就绪。先把图片方案交给 OpenClaw；图片完成后，再发送文字方案生成图文笔记并保存到草稿箱。
+                    两项任务已就绪。先把{isVideoTask ? "视频" : "图片"}方案交给 OpenClaw；素材完成后，再发送文字方案生成{isVideoTask ? "视频" : "图文"}笔记并保存到草稿箱。
                   </div>
                 ) : null}
               </div>
@@ -3281,7 +3498,7 @@ function ReferenceResearchPanel(props: {
     research?: ReferenceResearch;
     commands?: Array<{ category: string; command: string; description: string; safetyNote: string }>;
     researchPrompt?: string;
-    summary?: { summaryMarkdown: string; contentFeatures: string; personaInsights: string; strategyInsights: string };
+    summary?: { summaryMarkdown: string; contentFeatures: string; personaInsights: string; strategyInsights: string; writingStyleInsights: string };
   };
   prepareReferenceResearch: () => void;
   saveReferenceResearch: (event: React.FormEvent<HTMLFormElement>) => void;
@@ -3295,7 +3512,14 @@ function ReferenceResearchPanel(props: {
 
   const latest = draft.research || selected.referenceResearches?.[0];
   const researchPrompt = draft.researchPrompt || latest?.researchPrompt || "";
-  const summaryMarkdown = draft.summary?.summaryMarkdown || latest?.summaryMarkdown || "";
+  const rawSummaryMarkdown = draft.summary?.summaryMarkdown || latest?.summaryMarkdown || "";
+  const writingStyleInsights = draft.summary?.writingStyleInsights || latest?.writingStyleInsights || "";
+  const summaryMarkdown = [
+    rawSummaryMarkdown,
+    writingStyleInsights ? `## 爆款正文文风洞察\n\n${writingStyleInsights}` : ""
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   const researchTask = researchPrompt;
   const hasSearchPack = Boolean(researchPrompt);
   const hasSummary = Boolean(summaryMarkdown.trim());
@@ -3667,11 +3891,13 @@ function AssetsPanel(props: {
 function WeeklyPanel({
   selected,
   generateWeeklyPlan,
+  changeNoteTaskType,
   loading,
   loadingAction
 }: {
   selected?: Account;
   generateWeeklyPlan: (event: React.FormEvent<HTMLFormElement>) => void;
+  changeNoteTaskType: (task: NoteTask, type: NoteTask["type"]) => void;
   loading: boolean;
   loadingAction: string | null;
 }) {
@@ -3679,9 +3905,11 @@ function WeeklyPanel({
   const presets = useMemo(() => weeklyPresets(accountType), [accountType]);
   const [selectedPresetNames, setSelectedPresetNames] = useState<string[]>([]);
   const [weeklyFrequency, setWeeklyFrequency] = useState("4");
+  const [weeklyVideoCount, setWeeklyVideoCount] = useState("1");
   useEffect(() => {
     setSelectedPresetNames(presets[0]?.name ? [presets[0].name] : []);
     setWeeklyFrequency(String(presets[0]?.frequency || 4));
+    setWeeklyVideoCount((presets[0]?.frequency || 4) >= 3 ? "1" : "0");
   }, [presets]);
 
   if (!selected) return <EmptyState />;
@@ -3698,6 +3926,7 @@ function WeeklyPanel({
   const focusCopy = weeklyFocusCopy(selected.accountType);
   const defaultRatio = weeklyCopy.ratio;
   const effectiveFrequency = clampWeeklyFrequency(weeklyFrequency, combinedPreset.frequency);
+  const effectiveVideoCount = Math.max(0, Math.min(Number.parseInt(weeklyVideoCount, 10) || 0, effectiveFrequency));
   const normalizedRatio = normalizeWeeklyRatio(combinedPreset.ratio || defaultRatio, effectiveFrequency);
   const togglePreset = (name: string) => {
     setSelectedPresetNames((current) => {
@@ -3788,6 +4017,17 @@ function WeeklyPanel({
               value={weeklyFrequency}
               onChange={setWeeklyFrequency}
             />
+            <Input
+              name="videoCount"
+              label="其中视频笔记"
+              type="number"
+              min={0}
+              max={effectiveFrequency}
+              step={1}
+              value={String(effectiveVideoCount)}
+              onChange={setWeeklyVideoCount}
+              help={`图文 ${effectiveFrequency - effectiveVideoCount} 篇 / 视频 ${effectiveVideoCount} 篇`}
+            />
             <div className="rounded border border-ink/10 bg-white p-3 text-sm">
               <div className="font-medium">内容分配</div>
               <div className="mt-2 leading-6 text-ink/65">{normalizedRatio}</div>
@@ -3824,13 +4064,13 @@ function WeeklyPanel({
           </div>
         </form>
 
-        <PlanPreview plan={selected.weeklyPlans?.[0]} />
+        <PlanPreview plan={selected.weeklyPlans?.[0]} changeNoteTaskType={changeNoteTaskType} loading={loading} />
       </div>
     </div>
   );
 }
 
-function PlanPreview({ plan }: { plan?: WeeklyPlan }) {
+function PlanPreview({ plan, changeNoteTaskType, loading }: { plan?: WeeklyPlan; changeNoteTaskType: (task: NoteTask, type: NoteTask["type"]) => void; loading: boolean }) {
   if (!plan) {
     return (
       <div className="panel">
@@ -3856,6 +4096,16 @@ function PlanPreview({ plan }: { plan?: WeeklyPlan }) {
             <div className="mb-1 flex flex-wrap items-center gap-2">
               <span className="rounded bg-ink px-2 py-1 text-xs text-white">{task.publishAt}</span>
               <span className="rounded bg-teal/10 px-2 py-1 text-xs text-teal">{task.contentType}</span>
+              <select
+                aria-label={`切换 ${task.topicTitle} 的帖子类型`}
+                value={task.type}
+                disabled={loading}
+                onChange={(event) => changeNoteTaskType(task, event.target.value as NoteTask["type"])}
+                className="h-7 rounded border border-ink/15 bg-white px-2 text-xs"
+              >
+                <option value="image_text">图文笔记</option>
+                <option value="video_text">视频笔记</option>
+              </select>
               <span className="rounded bg-coral/10 px-2 py-1 text-xs text-coral">{task.status}</span>
             </div>
             <div className="font-medium">{task.topicTitle}</div>
@@ -3933,7 +4183,8 @@ function ImagesPanel(props: {
     loading,
     loadingAction
   } = props;
-  const note = plan?.noteTasks.find((task) => task.id === selectedNoteId) ?? plan?.noteTasks?.[0];
+  const imageTasks = plan?.noteTasks.filter((task) => task.type === "image_text") || [];
+  const note = imageTasks.find((task) => task.id === selectedNoteId) ?? imageTasks[0];
   const result = note ? imagePromptResults[note.id] : null;
   const latestStudy = imageStyleDraft.study || selected?.imageStyleStudies?.[0];
   const latestStyleSummary = imageStyleDraft.summary?.summaryMarkdown || latestStudy?.summaryMarkdown || result?.referenceStyle || "";
@@ -4243,7 +4494,7 @@ function ImagesPanel(props: {
                 <label className="field">
                   <span>选择笔记</span>
                   <select value={note.id} onChange={(event) => setSelectedNoteId(Number(event.target.value))}>
-                    {plan.noteTasks.map((task) => (
+                    {imageTasks.map((task) => (
                       <option key={task.id} value={task.id}>{task.topicTitle}</option>
                     ))}
                   </select>
@@ -4278,7 +4529,7 @@ function ImagesPanel(props: {
                   <div className="text-sm font-medium">当前笔记目标</div>
                   <div className="mt-2 text-sm leading-6 text-ink/65">
                     <div>封面方向：{note.coverCopyDirection || "未设置"}</div>
-                    <div>所需图片：{note.requiredImages || "按选题生成图卡结构"}</div>
+                    <div>所需素材：{note.requiredMaterials || "按选题准备素材"}</div>
                   </div>
                 </div>
               )}
@@ -4614,7 +4865,7 @@ function ImagesPanel(props: {
               <div className="text-sm font-medium">当前图片目标</div>
               <div className="mt-2 text-sm leading-6 text-ink/65">
                 <div>封面方向：{note?.coverCopyDirection || "未设置"}</div>
-                <div>所需图片：{note?.requiredImages || "按选题生成图卡结构"}</div>
+                <div>所需素材：{note?.requiredMaterials || "按选题准备素材"}</div>
               </div>
             </div>
           )}
@@ -4733,6 +4984,115 @@ function ImagesPanel(props: {
   );
 }
 
+function VideosPanel(props: {
+  selected?: Account;
+  plan?: WeeklyPlan;
+  selectedNoteId: number | null;
+  setSelectedNoteId: (id: number) => void;
+  results: Record<number, VideoPromptResult>;
+  generateVideoPrompt: (task: NoteTask, mode: "direct_video" | "image_to_video", assets: Asset[]) => void;
+  uploadVideoAsset: (file: File) => Promise<Asset | null>;
+  copy: (text: string) => void;
+  loading: boolean;
+  loadingAction: string | null;
+}) {
+  const { selected, plan, selectedNoteId, setSelectedNoteId, results, generateVideoPrompt, uploadVideoAsset, copy, loading, loadingAction } = props;
+  const tasks = plan?.noteTasks.filter((task) => task.type === "video_text") || [];
+  const note = tasks.find((task) => task.id === selectedNoteId) || tasks[0];
+  const [mode, setMode] = useState<"direct_video" | "image_to_video">("direct_video");
+  const [selectedUrls, setSelectedUrls] = useState<string[]>([]);
+  const videoAssets = (selected?.assets || []).filter(isRemoteVideoAsset);
+  const imageAssets = (selected?.assets || []).filter(isRemoteImageAsset);
+  const result = note ? results[note.id] : null;
+  const videoTaskContent = result?.openclawTask.content || note?.plan || "";
+
+  useEffect(() => {
+    if (note && note.id !== selectedNoteId) setSelectedNoteId(note.id);
+  }, [note, selectedNoteId, setSelectedNoteId]);
+  useEffect(() => setSelectedUrls([]), [note?.id, mode]);
+
+  function toggle(url: string) {
+    setSelectedUrls((current) => current.includes(url) ? current.filter((item) => item !== url) : mode === "direct_video" ? [url] : current.length < 6 ? [...current, url] : current);
+  }
+
+  function move(index: number, offset: -1 | 1) {
+    setSelectedUrls((current) => {
+      const target = index + offset;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
+  if (!plan || !note) return <div className="panel"><EmptyState text="本周没有视频笔记。请在生成一周计划时设置视频篇数。" /></div>;
+  const candidates = mode === "direct_video" ? videoAssets : imageAssets;
+  const selectedAssets = selectedUrls.map((url) => candidates.find((asset) => asset.fileUrl === url)).filter((asset): asset is Asset => Boolean(asset));
+  const canGenerate = mode === "direct_video" ? selectedAssets.length === 1 : selectedAssets.length >= 2 && selectedAssets.length <= 6;
+
+  return (
+    <div className="space-y-5">
+      <div className="panel">
+        <div className="mb-4">
+          <h2 className="section-title">视频方案</h2>
+          <p className="mt-1 text-sm text-ink/60">直接使用一个视频，或按顺序选择 2-6 张图片生成多段视频并拼接。</p>
+        </div>
+        <label className="field">
+          <span>选择视频笔记</span>
+          <select value={note.id} onChange={(event) => setSelectedNoteId(Number(event.target.value))}>
+            {tasks.map((task) => <option key={task.id} value={task.id}>{task.topicTitle}</option>)}
+          </select>
+        </label>
+        <div className="mt-4 grid gap-2 md:grid-cols-2">
+          <button type="button" onClick={() => setMode("direct_video")} className={clsx("rounded border p-4 text-left", mode === "direct_video" ? "border-teal bg-teal/10" : "border-ink/10 bg-white")}>
+            <div className="font-semibold">直接使用视频</div><div className="mt-1 text-xs text-ink/60">上传或选择一个素材库视频，不做精修。</div>
+          </button>
+          <button type="button" onClick={() => setMode("image_to_video")} className={clsx("rounded border p-4 text-left", mode === "image_to_video" ? "border-teal bg-teal/10" : "border-ink/10 bg-white")}>
+            <div className="font-semibold">图片生成视频</div><div className="mt-1 text-xs text-ink/60">AI 生成逐图精修和动态 Prompt，OpenClaw 生成片段后拼接。</div>
+          </button>
+        </div>
+
+        {mode === "direct_video" && (
+          <div className="mt-4">
+            <label className="secondary-button w-fit cursor-pointer">
+              <Upload size={16} /> {loadingAction === "uploadVideoAsset" ? "正在上传..." : "上传视频"}
+              <input type="file" accept="video/mp4,video/quicktime,video/x-m4v,video/webm,.mp4,.mov,.m4v,.webm" className="hidden" disabled={loading} onChange={async (event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                const asset = await uploadVideoAsset(file);
+                if (asset?.fileUrl) setSelectedUrls([asset.fileUrl]);
+                event.target.value = "";
+              }} />
+            </label>
+          </div>
+        )}
+
+        <div className="mt-4 rounded border border-ink/10 bg-ink/5 p-3">
+          <div className="mb-2 text-sm font-medium">{mode === "direct_video" ? "选择 1 个视频" : "选择并排列 2-6 张图片"}</div>
+          {candidates.length ? <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">{candidates.map((asset) => {
+            const url = asset.fileUrl || "";
+            const index = selectedUrls.indexOf(url);
+            return <div key={asset.id} className={clsx("min-w-0 rounded border bg-white p-2", index >= 0 ? "border-teal" : "border-ink/10")}>
+              <button type="button" onClick={() => toggle(url)} className="flex w-full min-w-0 items-center gap-3 text-left">
+                {mode === "direct_video" ? <video src={url} className="h-16 w-16 shrink-0 rounded object-cover" muted preload="metadata" /> : <img src={url} alt={asset.tags || asset.filePath} className="h-16 w-16 shrink-0 rounded object-cover" />}
+                <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{asset.tags || asset.filePath}</span><span className="block truncate text-xs text-ink/50">{index >= 0 ? `已选第 ${index + 1} 项` : "点击选择"}</span></span>
+              </button>
+              {mode === "image_to_video" && index >= 0 && <div className="mt-2 flex justify-end gap-1"><IconButton title="上移" onClick={() => move(index, -1)} icon={<ArrowUp size={14} />} /><IconButton title="下移" onClick={() => move(index, 1)} icon={<ArrowDown size={14} />} /></div>}
+            </div>;
+          })}</div> : <EmptyState text={mode === "direct_video" ? "素材库还没有视频，可在上方直接上传。" : "素材库还没有可用图片。"} />}
+        </div>
+        <button type="button" disabled={loading || !canGenerate} onClick={() => generateVideoPrompt(note, mode, selectedAssets)} className="primary-button mt-4">
+          <ActionButtonContent loading={loadingAction === "generateVideoPrompt"} icon={<Video size={17} />} idleText={mode === "direct_video" ? "生成直接视频任务" : "生成图片转视频方案"} loadingText="正在生成视频方案..." />
+        </button>
+      </div>
+      <div className="panel">
+        <div className="mb-3 flex items-center justify-between"><div><h2 className="section-title">OpenClaw 视频任务</h2><p className="mt-1 text-sm text-ink/60">复制后交给 OpenClaw 准备最终视频和 video-path.txt。</p></div><IconButton title="复制视频任务" onClick={() => copy(videoTaskContent)} icon={<Clipboard size={17} />} /></div>
+        <textarea className="code-textarea min-h-[560px]" value={videoTaskContent || "生成后显示视频执行任务。"} readOnly />
+      </div>
+    </div>
+  );
+}
+
 function PromptsPanel(props: {
   plan?: WeeklyPlan;
   selectedNoteId: number | null;
@@ -4748,7 +5108,8 @@ function PromptsPanel(props: {
   const result = note ? promptResults[note.id] : null;
   const openclawTaskContent = result?.openclawTask?.content || result?.prompt.content || "";
   if (!plan || !note) return <div className="panel"><EmptyState text="先生成本周内容，再生成笔记草稿。" /></div>;
-  const hasImagePlan = Boolean(note.imagePlan?.trim());
+  const hasMediaPlan = Boolean(note.plan?.trim());
+  const isVideo = note.type === "video_text";
   return (
     <div className="grid gap-5 xl:grid-cols-[0.45fr_0.55fr]">
       <div className="panel">
@@ -4758,39 +5119,39 @@ function PromptsPanel(props: {
             <button key={task.id} type="button" onClick={() => setSelectedNoteId(task.id)} className={clsx("w-full rounded border p-3 text-left text-sm", task.id === note.id ? "border-ink bg-white" : "border-ink/10 bg-white/60")}>
               <div className="font-medium">{task.topicTitle}</div>
               <div className="mt-1 text-xs text-ink/60">{task.publishAt} / {task.status}</div>
-              <div className={clsx("mt-1 text-xs font-medium", task.imagePlan?.trim() ? "text-teal" : "text-coral")}>
-                {task.imagePlan?.trim() ? "图片方案已完成" : "待生成图片方案"}
+              <div className={clsx("mt-1 text-xs font-medium", task.plan?.trim() ? "text-teal" : "text-coral")}>
+                {task.plan?.trim() ? (task.type === "video_text" ? "视频方案已完成" : "图片方案已完成") : (task.type === "video_text" ? "待生成视频方案" : "待生成图片方案")}
               </div>
             </button>
           ))}
         </div>
-        <button type="button" onClick={() => generatePrompt(note)} disabled={loading || !hasImagePlan} aria-busy={loadingAction === "generatePrompt"} className="primary-button mt-4">
+        <button type="button" onClick={() => generatePrompt(note)} disabled={loading || !hasMediaPlan} aria-busy={loadingAction === "generatePrompt"} className="primary-button mt-4">
           <ActionButtonContent
             loading={loadingAction === "generatePrompt"}
             icon={<Wand2 size={17} />}
-            idleText="生成图文草稿箱指令"
+            idleText={isVideo ? "生成视频草稿箱指令" : "生成图文草稿箱指令"}
             loadingText="正在生成草稿箱指令..."
           />
         </button>
-        <p className={clsx("mt-3 text-xs leading-5", hasImagePlan ? "text-ink/60" : "font-medium text-coral")}>
-          {hasImagePlan
-            ? "图片方案已完成，可以生成图文草稿箱指令。"
-            : "当前笔记尚未生成图片方案，请先前往“图片方案 → 单篇精修模式”完成图片方案。"}
+        <p className={clsx("mt-3 text-xs leading-5", hasMediaPlan ? "text-ink/60" : "font-medium text-coral")}>
+          {hasMediaPlan
+            ? `${isVideo ? "视频" : "图片"}方案已完成，可以生成草稿箱指令。`
+            : `当前笔记尚未生成${isVideo ? "视频" : "图片"}方案，请先前往“${isVideo ? "视频方案" : "图片方案 → 单篇精修模式"}”完成方案。`}
         </p>
       </div>
       <div className="space-y-5">
         <div className="panel">
           <div className="mb-3 flex items-center justify-between">
             <div>
-              <h2 className="section-title">OpenClaw 图文草稿箱任务</h2>
-              <p className="mt-1 text-sm text-ink/60">复制完整任务给 OpenClaw：生成标题和正文、使用图片方案成品，并保存到指定账号草稿箱。</p>
+              <h2 className="section-title">OpenClaw {isVideo ? "视频" : "图文"}草稿箱任务</h2>
+              <p className="mt-1 text-sm text-ink/60">复制完整任务给 OpenClaw：生成标题和正文、使用{isVideo ? "视频" : "图片"}方案成品，并保存到指定账号草稿箱。</p>
             </div>
             <div className="flex gap-2">
               <IconButton title="复制完整任务" onClick={() => copy(openclawTaskContent)} icon={<Clipboard size={17} />} />
               <IconButton title="导出 Markdown" onClick={() => downloadText(`note-${note.id}-openclaw-draft-task.md`, openclawTaskContent)} icon={<Download size={17} />} />
             </div>
           </div>
-          <textarea className="code-textarea min-h-[520px]" value={openclawTaskContent || "点击生成按钮后显示可直接发送给 OpenClaw 的图文草稿箱任务。"} readOnly />
+          <textarea className="code-textarea min-h-[520px]" value={openclawTaskContent || `点击生成按钮后显示可直接发送给 OpenClaw 的${isVideo ? "视频" : "图文"}草稿箱任务。`} readOnly />
         </div>
 
       </div>
@@ -4990,14 +5351,27 @@ function ReportsPanel(props: {
   selectedNoteId: number | null;
   setSelectedNoteId: (id: number) => void;
   generatePostReview: (event: React.FormEvent<HTMLFormElement>) => void;
-  saveExpertRules: (event: React.FormEvent<HTMLFormElement>) => void;
-  postReviewPrompt: string;
-  copy: (text: string) => void;
+  saveExpertRuleSelection: (enabledRuleIds: number[]) => Promise<void>;
   loading: boolean;
   loadingAction: string | null;
 }) {
-  const { selected, latestPlan, selectedNoteId, setSelectedNoteId, generatePostReview, saveExpertRules, postReviewPrompt, copy, loading, loadingAction } = props;
+  const { selected, latestPlan, selectedNoteId, setSelectedNoteId, generatePostReview, saveExpertRuleSelection, loading, loadingAction } = props;
+  const [selectedRuleIds, setSelectedRuleIds] = useState<number[]>([]);
   const note = latestPlan?.noteTasks.find((task) => task.id === selectedNoteId) ?? latestPlan?.noteTasks?.[0];
+  const latestReview = note
+    ? selected?.postReviews?.find((review) => review.noteTaskId === note.id)
+    : selected?.postReviews?.[0];
+
+  useEffect(() => {
+    setSelectedRuleIds((selected?.expertRules || []).filter((rule) => isExpertRuleEnabled(rule.enabled)).slice(0, 5).map((rule) => rule.id));
+  }, [selected?.id, selected?.expertRules]);
+
+  function toggleRule(ruleId: number) {
+    setSelectedRuleIds((current) => {
+      if (current.includes(ruleId)) return current.filter((id) => id !== ruleId);
+      return current.length >= 5 ? current : [...current, ruleId];
+    });
+  }
 
   if (!selected) return <div className="panel"><EmptyState /></div>;
 
@@ -5008,7 +5382,7 @@ function ReportsPanel(props: {
           <div>
             <h2 className="section-title">专家复盘</h2>
             <p className="mt-1 max-w-3xl text-sm leading-6 text-ink/60">
-              这里按“每条帖子”复盘。每发完一篇，就把数据、评论、专家改稿和你的观察放进来，生成诊断并沉淀规则。
+              每发完一篇，将实际内容和可用证据提交给 AI 完成诊断；候选规则会自动保存，再由你选择是否用于后续内容生成。
             </p>
           </div>
           <div className="rounded bg-teal/10 px-3 py-2 text-sm font-medium text-teal">
@@ -5025,8 +5399,8 @@ function ReportsPanel(props: {
             <p className="mt-1 text-sm leading-6 text-ink/60">输入曝光、点击、收藏、评论、私信、转化和真实反馈。</p>
           </div>
           <div className="rounded border border-ink/10 bg-white p-4">
-            <div className="font-semibold">3. 沉淀规则</div>
-            <p className="mt-1 text-sm leading-6 text-ink/60">把输出里的候选规则保存，后续生成内容会逐步吸收。</p>
+            <div className="font-semibold">3. 自动沉淀</div>
+            <p className="mt-1 text-sm leading-6 text-ink/60">复盘完成后自动保存候选规则，后续生成会按相关模块优先参考。</p>
           </div>
         </div>
       </div>
@@ -5058,15 +5432,15 @@ function ReportsPanel(props: {
             </div>
             <Textarea
               name="metrics"
-              label="发布表现数据"
+              label="发布表现数据（可选）"
               placeholder={"曝光：\n点击：\n点赞：\n收藏：\n评论：\n私信：\n转化："}
               help="没有完整后台数据也没关系，先填能看到的。"
             />
-            <Textarea name="comments" label="评论区 / 私信 / 用户反馈" placeholder="粘贴典型评论、私信问题、客户反馈。" />
+            <Textarea name="comments" label="评论区 / 私信 / 用户反馈（可选）" placeholder="粘贴典型评论、私信问题、客户反馈。" />
             <details className="rounded border border-ink/10 bg-white p-3">
               <summary className="cursor-pointer text-sm font-medium">补充专家改稿和实际内容（可选）</summary>
               <div className="mt-3 grid gap-3">
-                <Textarea name="actualContent" label="实际发布正文 / 图片顺序" placeholder="粘贴最终正文、封面文字、图片顺序。" />
+                <Textarea name="actualContent" label="实际发布正文" placeholder="粘贴最终发布的正文内容。" />
                 <Textarea name="expertFeedback" label="专家点评 / 客户反馈" placeholder="专家说哪里需要改、客户最终选择了什么。" />
                 <Textarea name="editComparison" label="修改前后对比" placeholder={"原始标题：...\n最终标题：...\n修改理由：..."} />
                 <Textarea name="subjective" label="你的观察" placeholder="例如：评论集中问价格；收藏高但私信少；封面像广告。" />
@@ -5083,66 +5457,82 @@ function ReportsPanel(props: {
             <ActionButtonContent
               loading={loadingAction === "generatePostReview"}
               icon={<Send size={17} />}
-              idleText="生成单帖复盘 Prompt"
-              loadingText="正在生成单帖复盘 Prompt..."
+              idleText="执行专家复盘"
+              loadingText="AI 正在执行专家复盘..."
             />
           </button>
         </form>
 
         <div className="min-w-0 space-y-5">
           <div className="panel min-w-0">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="section-title">复盘 Prompt</h2>
-                <p className="mt-1 text-sm text-ink/60">复制给大模型或龙虾后，把输出中的候选规则粘到下方保存。</p>
-              </div>
-              <IconButton title="复制" onClick={() => copy(postReviewPrompt)} icon={<Clipboard size={17} />} />
-            </div>
-            {postReviewPrompt ? <MarkdownBox value={postReviewPrompt} /> : <EmptyState text="生成后这里会显示单帖复盘 Prompt。" />}
-          </div>
-
-          <form className="panel" onSubmit={saveExpertRules}>
-            <input type="hidden" name="source" value="post_review" readOnly />
             <div className="mb-3">
-              <h2 className="section-title">保存候选规则</h2>
-              <p className="mt-1 text-sm text-ink/60">
-                可选步骤：把复盘输出里的 JSON 规则数组粘贴进来。保存后，后续生成笔记草稿和图片方案时会自动参考这些经验。
-              </p>
-            </div>
-            <Textarea name="rulesJson" label="候选规则 JSON" placeholder={'[{"module":"title","rule":"...","confidence":0.5}]'} />
-            <button type="submit" disabled={loading} aria-busy={loadingAction === "saveExpertRules"} className="secondary-button mt-4">
-              <ActionButtonContent
-                loading={loadingAction === "saveExpertRules"}
-                icon={<Save size={17} />}
-                idleText="保存到规则库"
-                loadingText="正在保存到规则库..."
-              />
-            </button>
-          </form>
-        </div>
-      </div>
-
-      <div className="panel">
-        <div className="mb-3">
-          <h2 className="section-title">最近经验</h2>
-          <p className="mt-1 text-sm text-ink/60">这些规则会作为内部经验进入后续生成 Prompt，不会直接出现在发布文案里。</p>
-        </div>
-        {selected.expertRules?.length ? (
-          <div className="grid gap-2 md:grid-cols-2">
-            {selected.expertRules.slice(0, 8).map((rule) => (
-              <div key={rule.id} className="rounded border border-ink/10 bg-white p-3">
-                <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-ink/50">
-                  <span>{rule.module}</span>
-                  <span>{rule.source || "manual"}</span>
-                  <span>置信度 {rule.confidence}</span>
-                </div>
-                <div className="text-sm leading-6">{rule.rule}</div>
+              <div>
+                <h2 className="section-title">专家复盘结果</h2>
+                <p className="mt-1 text-sm text-ink/60">显示当前笔记最近一次复盘；候选规则已同步保存到服务端规则库。</p>
               </div>
-            ))}
+            </div>
+            {latestReview ? (
+              <div className="rounded border border-ink/10 bg-white p-4">
+                <div className="mb-2 text-xs font-medium text-teal">复盘总结</div>
+                <div className="whitespace-pre-wrap text-sm leading-7">{latestReview.summary}</div>
+              </div>
+            ) : <EmptyState text="执行后，这里会显示 AI 专家复盘结果。" />}
           </div>
-        ) : (
-          <EmptyState text="还没有保存规则。先完成一篇单帖复盘。" />
-        )}
+
+          <div className="panel min-w-0">
+            <div className="mb-3">
+              <h2 className="section-title">规则库选择</h2>
+              <p className="mt-1 text-sm text-ink/60">当前账号共 {selected.expertRules?.length || 0} 条规则。勾选后才会用于后续生成，最多启用 5 条。</p>
+            </div>
+            {selected.expertRules?.length ? (
+              <div className="space-y-3">
+                <div className="max-h-[500px] space-y-2 overflow-y-auto pr-2">
+                  {selected.expertRules.map((rule) => (
+                    <div key={rule.id} className="rounded border border-ink/10 bg-white p-3">
+                      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-ink/50">
+                        <label className="flex cursor-pointer items-center gap-2 text-ink">
+                          <input
+                            type="checkbox"
+                            checked={selectedRuleIds.includes(rule.id)}
+                            disabled={loading || (!selectedRuleIds.includes(rule.id) && selectedRuleIds.length >= 5)}
+                            onChange={() => toggleRule(rule.id)}
+                          />
+                          <span>{selectedRuleIds.includes(rule.id) ? "已选择" : "未选择"}</span>
+                        </label>
+                        <span>{rule.module}</span>
+                        <span>{rule.source || "manual"}</span>
+                      </div>
+                      <div className="text-sm font-medium leading-6">{rule.rule}</div>
+                      {rule.reason ? <div className="mt-2 text-xs leading-5 text-ink/60">依据：{rule.reason}</div> : null}
+                      {rule.applicableWhen ? <div className="mt-1 text-xs leading-5 text-ink/60">适用：{rule.applicableWhen}</div> : null}
+                      {rule.notApplicableWhen ? <div className="mt-1 text-xs leading-5 text-ink/60">不适用：{rule.notApplicableWhen}</div> : null}
+                      {rule.nextTest ? <div className="mt-1 text-xs leading-5 text-ink/60">下次验证：{rule.nextTest}</div> : null}
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center justify-between gap-3 border-t border-ink/10 pt-3">
+                  <span className="text-xs text-ink/55">已选 {selectedRuleIds.length}/5 条</span>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    aria-busy={loadingAction === "saveExpertRuleSelection"}
+                    className="primary-button"
+                    onClick={() => void saveExpertRuleSelection(selectedRuleIds)}
+                  >
+                    <ActionButtonContent
+                      loading={loadingAction === "saveExpertRuleSelection"}
+                      icon={<Save size={17} />}
+                      idleText="保存规则选择"
+                      loadingText="正在保存规则选择..."
+                    />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <EmptyState text="还没有候选规则。先执行一次专家复盘。" />
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -5157,12 +5547,11 @@ function IndustryLearningPanel(props: {
   };
   prepareIndustryLearning: (event: React.FormEvent<HTMLFormElement>) => void;
   saveIndustryLearning: (event: React.FormEvent<HTMLFormElement>) => void;
-  saveExpertRules: (event: React.FormEvent<HTMLFormElement>) => void;
   copy: (text: string) => void;
   loading: boolean;
   loadingAction: string | null;
 }) {
-  const { selected, draft, prepareIndustryLearning, saveIndustryLearning, saveExpertRules, copy, loading, loadingAction } = props;
+  const { selected, draft, prepareIndustryLearning, saveIndustryLearning, copy, loading, loadingAction } = props;
   const commands = draft.commands || safeParseCommands(draft.research?.commandJson || selected?.industryKnowledgeResearches?.[0]?.commandJson || "[]");
   const researchPrompt = draft.researchPrompt || draft.research?.researchPrompt || selected?.industryKnowledgeResearches?.[0]?.researchPrompt || "";
   const commandText = commands.map((item) => item.command).join("\n");
@@ -5262,22 +5651,12 @@ function IndustryLearningPanel(props: {
             </button>
           </form>
 
-          <form className="panel" onSubmit={saveExpertRules}>
-            <input type="hidden" name="source" value="industry_learning" readOnly />
-            <div className="mb-3">
-              <h2 className="section-title">沉淀为专家规则</h2>
-              <p className="mt-1 text-sm text-ink/60">把行业学习输出里的 JSON 规则数组粘贴进来。</p>
-            </div>
-            <Textarea name="rulesJson" label="候选规则 JSON" placeholder={'[{"module":"cover","rule":"...","source":"expert_article","confidence":0.6}]'} />
-            <button type="submit" disabled={loading} aria-busy={loadingAction === "saveExpertRules"} className="primary-button mt-4">
-              <ActionButtonContent
-                loading={loadingAction === "saveExpertRules"}
-                icon={<Sparkles size={17} />}
-                idleText="保存到规则库"
-                loadingText="正在保存到规则库..."
-              />
-            </button>
-          </form>
+          <div className="panel">
+            <h2 className="section-title">规则沉淀方式</h2>
+            <p className="mt-1 text-sm leading-6 text-ink/60">
+              行业学习材料会作为复盘参考保留；可复用规则仅由“专家复盘”自动生成并保存，避免手工 JSON 规则绕过账号级数量和启用状态限制。
+            </p>
+          </div>
         </div>
       </div>
     </div>
@@ -5507,11 +5886,13 @@ ${plan.noteTasks
     (task, index) => `### ${index + 1}. ${task.topicTitle}
 - 发布时间：${task.publishAt}
 - 内容类型：${task.contentType}
+- 帖子形式：${task.type === "video_text" ? "视频笔记" : "图文笔记"}
 - 内容目标：${task.contentGoal}
 - 目标用户：${task.targetUser}
 - 用户痛点：${task.painPoint}
 - 核心观点：${task.coreView}
 - 正文结构：${task.bodyStructure}
+- 所需素材：${task.requiredMaterials}
 - 推荐素材：${task.recommendedAssets}
 - 封面文案方向：${task.coverCopyDirection}
 - 评论区钩子：${task.commentHook}

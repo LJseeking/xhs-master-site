@@ -2,6 +2,7 @@ import { accountTypeTemplates, getTemplateByKey } from "@/data/accountTypeTempla
 import { completeWithBackendAi } from "@/lib/backendAiClient";
 import { buildAccountStrategy } from "@/lib/strategy";
 import type { RecentWeeklyTopicGroup } from "@/lib/weeklyTopicHistory";
+import { normalizeWeeklyTaskMedia } from "@/lib/weeklyPlan";
 
 type ClientAccountInput = {
   id?: number;
@@ -42,7 +43,8 @@ type WeeklyTaskSeed = {
   painPoint: string;
   coreView: string;
   bodyStructure: string;
-  requiredImages: string;
+  type: "image_text" | "video_text";
+  requiredMaterials: string;
   recommendedAssets: string;
   coverCopyDirection: string;
   commentHook: string;
@@ -54,6 +56,7 @@ type WeeklyPlanInput = {
   theme: string;
   goal: string;
   frequency: number;
+  videoCount?: number;
   ratio: string;
   testHypothesis: string;
   commercializationMove: string;
@@ -63,6 +66,14 @@ type WeeklyPlanInput = {
   weeklyFocus?: string;
   recentTopicGroups?: RecentWeeklyTopicGroup[];
 };
+
+function appendOpenClawAccountIdentity(text: string, account: Pick<ClientAccountInput, "name" | "accountParam">) {
+  const accountParam = account.accountParam?.trim() || "未设置";
+  const marker = `OpenClaw 账号 ID（accountParam）：\`${accountParam}\``;
+  if (text.includes(marker)) return text;
+
+  return `${text.trim()}\n\n## OpenClaw 账号标识\n- 业务账号名称：${account.name}\n- ${marker}\n- 所有需要切换小红书账号的 CLI 命令必须使用：\`--account ${accountParam}\`。账号名称和本系统数据库编号均不可替代该参数。\n`;
+}
 
 function getBrowserLlmStatus() {
   return {
@@ -219,6 +230,7 @@ export async function generateStrategyWithBrowserLlm(account: ClientAccountInput
 - 当前产品模式是 Prompt + Command only，不允许真实发布、评论、点赞、收藏、私信。
 - 如果 account.referenceAccounts 中包含参考账号研究洞察，必须优先用于人设、差异化定位、栏目、标题、封面和商业化策略。
 - 必须保留 xiaohongshu_auto_op 的执行边界：真实账号操作只输出命令建议，人工确认。
+- 策划案 Markdown 和 AGENTS.md 都必须包含“OpenClaw 账号标识”章节，写明业务账号名称、OpenClaw 账号 ID（accountParam）以及唯一可用的 \`--account <accountParam>\` 参数。
 - 不伪造真实体验、真实授权、真实探店、真实亲历、真实轨迹或真实交易。
 - 以中文输出。
 - 只返回 JSON，不要 Markdown 代码块。
@@ -281,8 +293,8 @@ JSON 字段：
       data: {
         positioning: readString(parsed, "positioning") || fallback.positioning,
         strategyJson: JSON.stringify(readObject(parsed, "strategy") || safeJson(fallback.strategyJson), null, 2),
-        markdown: readString(parsed, "markdown") || fallback.markdown,
-        agentsMdContent: readString(parsed, "agentsMdContent") || fallback.agentsMdContent,
+        markdown: appendOpenClawAccountIdentity(readString(parsed, "markdown") || fallback.markdown, accountRecord),
+        agentsMdContent: appendOpenClawAccountIdentity(readString(parsed, "agentsMdContent") || fallback.agentsMdContent, accountRecord),
         execGuide: readString(parsed, "execGuide") || fallback.execGuide
       }
     };
@@ -317,6 +329,7 @@ export async function generateWeeklyTasksWithBrowserLlm(input: {
     theme: input.weeklyInput.theme,
     goal: input.weeklyInput.goal,
     frequency: input.weeklyInput.frequency,
+    videoCount: input.weeklyInput.videoCount,
     ratio: input.weeklyInput.ratio,
     testHypothesis: input.weeklyInput.testHypothesis,
     commercializationMove: input.weeklyInput.commercializationMove,
@@ -354,12 +367,14 @@ export async function generateWeeklyTasksWithBrowserLlm(input: {
 
 要求：
 - 生成 ${input.fallbackTasks.length} 篇。
+- 其中必须有 ${Math.max(0, Math.min(input.weeklyInput.videoCount || 0, input.fallbackTasks.length))} 篇 type 为 video_text，其余为 image_text；视频任务应优先选择适合动态演示、空间动线、过程或氛围表达的选题。
 - 必须优先阅读并遵循输入中的完整 strategy；账号定位、人设、目标用户、内容栏目、标题封面策略、商业化路径和风险边界都应以 strategy 为主要依据，不能只依据账号类型套用通用模板。
 - 如果 weeklyInput.weeklyFocus 非空，它代表用户主动指定的本周重点，应作为本周选题的最高优先级；围绕该重点拆分具体且不重复的任务，同时不得违背 strategy 中的真实性和风险边界。
 - 如果 weeklyInput.weeklyFocus 为空，则以完整 strategy 和本周运营目标为主要依据生成选题。
 - 当前执行模式是只生成计划、Prompt 和命令建议，不允许真实发布或互动。
-- 每篇任务必须具体到用户痛点、核心观点、正文结构、图片要求、评论区钩子。
-- bodyStructure 只能描述面向目标读者的内容推进方式，必须使用可直接转化为发布正文的读者视角表达；不得写成运营分析、素材评估或创作说明。
+- 每篇任务必须具体到用户痛点、核心观点、正文结构、图片或视频素材要求、评论区钩子。
+- bodyStructure 是无顺序、可省略的候选内容要点和事实范围，不是正文结构流程；每项可以独立采用或省略，不得要求逐项覆盖。
+- bodyStructure 不得使用“开头、接着、然后、最后”等顺序词，不得使用箭头、编号或其他固定顺序表达；不得描述语气、文风、开场句式或段落节奏。
 - bodyStructure 不得出现“素材观察”“用于测试”“本篇承担”“不能当攻略”“需要补齐资料”等内部策划话术，也不得使用含义相同的改写。
 - 信息不足只用于约束不能编造的事实，不得把“缺少资料”“参数不全”“不能作为完整攻略”等说明设计成正文开头；需要提醒时，转换成面向读者的自然行动建议，例如“出发前建议确认……”。
 - 推荐素材只能来自输入素材或明确写“素材缺口”，禁止伪造真实素材。
@@ -391,7 +406,8 @@ JSON 字段：
       "painPoint": "",
       "coreView": "",
       "bodyStructure": "",
-      "requiredImages": "",
+      "type": "image_text 或 video_text",
+      "requiredMaterials": "",
       "recommendedAssets": "",
       "coverCopyDirection": "",
       "commentHook": "",
@@ -428,7 +444,8 @@ JSON 字段：
         painPoint: stringFrom(task.painPoint, fallback.painPoint),
         coreView: stringFrom(task.coreView, fallback.coreView),
         bodyStructure: stringFrom(task.bodyStructure, fallback.bodyStructure),
-        requiredImages: stringFrom(task.requiredImages, fallback.requiredImages),
+        type: task.type === "video_text" ? "video_text" as const : "image_text" as const,
+        requiredMaterials: stringFrom(task.requiredMaterials, fallback.requiredMaterials),
         recommendedAssets: stringFrom(task.recommendedAssets, fallback.recommendedAssets),
         coverCopyDirection: stringFrom(task.coverCopyDirection, fallback.coverCopyDirection),
         commentHook: stringFrom(task.commentHook, fallback.commentHook),
@@ -437,7 +454,7 @@ JSON 字段：
       };
     });
 
-    return { usedLlm: true, data: tasks };
+    return { usedLlm: true, data: normalizeWeeklyTaskMedia(tasks, input.weeklyInput.videoCount || 0) };
   } catch (error) {
     return {
       usedLlm: false,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { buildTaskPrompt } from "@/lib/prompt";
 import { formatExpertRulesForPrompt } from "@/lib/expertLearning";
+import { buildVideoDraftTask } from "@/lib/videoPrompts";
 
 function shellQuote(value: string) {
   return `'${value.replace(/'/g, `'\"'\"'`)}'`;
@@ -104,9 +105,12 @@ export async function POST(request: Request, _context: { params: { id: string } 
     strategy: account.strategy,
     weeklyPlan,
     noteTask,
-    expertRules: formatExpertRulesForPrompt(account.expertRules || [])
+    expertRules: formatExpertRulesForPrompt(account.expertRules || [], ["title", "body", "interaction", "risk"])
   });
-  const openclawTask = buildOpenclawDraftTask({ account, noteTask, prompt: content });
+  const isVideo = noteTask.type === "video_text";
+  const openclawTask = isVideo
+    ? { title: `${noteTask.topicTitle} OpenClaw 视频草稿箱任务`, content: buildVideoDraftTask({ account, noteTask, bodyPrompt: content }), command: "" }
+    : buildOpenclawDraftTask({ account, noteTask, prompt: content });
   const prompt = {
     id: Date.now(),
     accountId: account.id,
@@ -117,10 +121,10 @@ export async function POST(request: Request, _context: { params: { id: string } 
 
   const commands = [
     {
-      category: "生成图文并保存到草稿箱",
+      category: isVideo ? "生成视频笔记并保存到草稿箱" : "生成图文并保存到草稿箱",
       command: openclawTask.command,
-      description: "使用图片方案阶段的成品图，填写对应小红书账号的图文发布表单并保存草稿。",
-      safetyNote: "只允许 fill-publish 后执行 save-draft；严禁调用 publish 或 click-publish。"
+      description: isVideo ? "使用视频方案阶段的成品视频，填写对应账号的视频发布表单并保存草稿。" : "使用图片方案阶段的成品图，填写对应小红书账号的图文发布表单并保存草稿。",
+      safetyNote: isVideo ? "只允许 fill-publish-video 后执行 save-draft；严禁真实发布。" : "只允许 fill-publish 后执行 save-draft；严禁调用 publish 或 click-publish。"
     }
   ];
 
